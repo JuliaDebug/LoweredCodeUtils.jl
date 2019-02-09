@@ -36,7 +36,7 @@ module Lowering end
                end)
         Core.eval(Lowering, ex)
         frame = JuliaInterpreter.prepare_toplevel(Lowering, ex)
-        LoweredCodeUtils.methoddef!(signatures, stack, frame)
+        methoddef!(signatures, stack, frame)
         push!(newcode, frame.code.code)
     end
 

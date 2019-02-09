@@ -5,6 +5,8 @@ using Base.Meta: isexpr
 using JuliaInterpreter
 using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!
 
+export whichtt, signature, methoddef!
+
 """
     method = whichtt(tt)
 
