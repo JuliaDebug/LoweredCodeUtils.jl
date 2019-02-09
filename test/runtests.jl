@@ -71,4 +71,19 @@ module Lowering end
     @test Lowering.h(2.0) == 2.0
     @test Lowering.h(2, 3) == 6
     @test Lowering.h(2, 3.0) == 5.0
+
+    # Don't be deceived by inner methods
+    stack = JuliaStackFrame[]
+    signatures = []
+    ex = quote
+        function fouter(x)
+            finner(::Float16) = 2x
+            return finner(Float16(1))
+        end
+    end
+    Core.eval(Lowering, ex)
+    frame = JuliaInterpreter.prepare_toplevel(Lowering, ex)
+    methoddef!(signatures, stack, frame)
+    @test length(signatures) == 1
+    @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
 end
