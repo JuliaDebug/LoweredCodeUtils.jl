@@ -86,4 +86,12 @@ module Lowering end
     methoddef!(signatures, stack, frame)
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
+
+    # Anonymous functions in method signatures
+    ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
+    frame = JuliaInterpreter.prepare_toplevel(Base, ex)
+    signatures = Set{Any}()
+    methoddef!(signatures, stack, frame)
+    @test length(signatures) == 1
+    @test first(signatures) == which(Base.max_values, Tuple{Type{Int16}}).sig
 end

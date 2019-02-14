@@ -93,9 +93,13 @@ If no 3-argument `:method` expression is found, `sigt` will be `nothing`.
 function signature(stack, frame, stmt, pc::JuliaProgramCounter)
     lastpc = pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
-        lastpc = pc
-        pc = _step_expr!(stack, frame, stmt, pc, true)
-        pc === nothing && return nothing, lastpc
+        if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
+            lastpc = pc = define_anonymous(stack, frame, stmt, pc)
+        else
+            lastpc = pc
+            pc = _step_expr!(stack, frame, stmt, pc, true)
+            pc === nothing && return nothing, lastpc
+        end
         stmt = pc_expr(frame, pc)
     end
     sigsv = @lookup(frame, stmt.args[2])::SimpleVector
@@ -103,6 +107,25 @@ function signature(stack, frame, stmt, pc::JuliaProgramCounter)
     return sigt, lastpc
 end
 signature(stack, frame, pc::JuliaProgramCounter) = signature(stack, frame, pc_expr(frame, pc), pc)
+
+##
+## Detecting anonymous functions. These start with a :thunk expr and have a characteristic CodeInfo
+##
+function isanonymous_typedef(code::CodeInfo)
+    length(code.code) >= 4 || return false
+    stmt = code.code[end-1]
+    isexpr(stmt, :struct_type) || return false
+    name = stmt.args[1]::Symbol
+    return startswith(String(name), "##")
+end
+
+function define_anonymous(stack, frame, stmt, pc)
+    while !isexpr(stmt, :method)
+        pc = _step_expr!(stack, frame, stmt, pc, true)
+        stmt = pc_expr(frame, pc)
+    end
+    return _step_expr!(stack, frame, stmt, pc, true)  # also define the method
+end
 
 ##
 ## Deal with gensymmed names, https://github.com/JuliaLang/julia/issues/30908
