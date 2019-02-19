@@ -1,6 +1,6 @@
 module LoweredCodeUtils
 
-using Core: SimpleVector, CodeInfo
+using Core: SimpleVector, CodeInfo, SSAValue
 using Base.Meta: isexpr
 using JuliaInterpreter
 using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!
@@ -128,6 +128,24 @@ function signature(stack, frame, stmt, pc::JuliaProgramCounter)
 end
 signature(stack, frame, pc::JuliaProgramCounter) = signature(stack, frame, pc_expr(frame, pc), pc)
 
+function minid(node, stmts, id)
+    if isa(node, SSAValue)
+        id = min(id, node.id)
+        stmt = stmts[node.id]
+        return minid(stmt, stmts, id)
+    elseif isa(node, Expr)
+        for a in node.args
+            id = minid(a, stmts, id)
+        end
+    end
+    return id
+end
+
+function signature_top(frame, stmt, pc)
+    @assert ismethod3(stmt)
+    return JuliaProgramCounter(minid(stmt.args[2], frame.code.code.code, convert(Int, pc)))
+end
+
 ##
 ## Detecting anonymous functions. These start with a :thunk expr and have a characteristic CodeInfo
 ##
@@ -136,7 +154,7 @@ function isanonymous_typedef(code::CodeInfo)
     stmt = code.code[end-1]
     isexpr(stmt, :struct_type) || return false
     name = stmt.args[1]::Symbol
-    return startswith(String(name), "##")
+    return startswith(String(name), "#")
 end
 
 function define_anonymous(stack, frame, stmt, pc)
@@ -183,37 +201,25 @@ a keyword or generated method.
 """
 function find_corrected_name(frame, pc, name, parentname)
     stmt = pc_expr(frame, pc)
-    while !ismethod1(stmt) || stmt.args[1] != parentname
-        ismethod1(stmt) && stmt.args[1] != name && break
-        pc += 1
-        stmt = pc_expr(frame, pc)
-    end
-    pctop = pc # keep track of the beginning of the signature
-    if stmt.args[1] != name && stmt.args[1] != parentname
-        # This might be the GeneratedFunctionStub for a @generated method
-        newname = stmt.args[1]
-        while !isexpr(stmt, :method, 3) || stmt.args[1] != newname
-            pc += 1
+    while true
+        while !ismethod3(stmt)
+            pc = next_or_nothing(frame, pc)
+            pc === nothing && return nothing
             stmt = pc_expr(frame, pc)
         end
         body = stmt.args[3]
-        bodystmt = body.code[1]
-        (isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated) || return nothing
-        return pctop, true
-    else
-        # Keyword arg function
-        while true
-            while !isexpr(stmt, :method, 3) || stmt.args[1] != parentname
-                pc += 1
-                stmt = pc_expr(frame, pc)
-            end
-            body = stmt.args[3]
+        if stmt.args[1] != name && stmt.args[1] != parentname
+            # This might be the GeneratedFunctionStub for a @generated method
+            bodystmt = body.code[1]
+            (isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated) || return nothing
+            return signature_top(frame, stmt, pc), true
+        elseif length(body.code) > 1
             bodystmt = body.code[end-1]  # the line before the final return
-            iscallto(bodystmt, name) && return pctop, false
-            pc += 1
-            pctop = pc
-            stmt = pc_expr(frame, pc)
+            iscallto(bodystmt, name) && return signature_top(frame, stmt, pc), false
         end
+        pc = next_or_nothing(frame, pc)
+        pc === nothing && return nothing
+        stmt = pc_expr(frame, pc)
     end
 end
 
@@ -308,6 +314,10 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter)
         error("not valid for anonymous methods")
     end
     parentname = get_parentname(name)  # e.g., name = #foo#7 and parentname = foo
+    nextstmt = pc_expr(frame, pc+1)
+    if ismethod1(nextstmt)
+        name = nextstmt.args[1]
+    end
     if name != parentname
         name, endpc = correct_name!(stack, frame, pc, name, parentname)
     end

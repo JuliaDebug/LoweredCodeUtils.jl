@@ -5,6 +5,7 @@ using Test
 
 module Lowering
 struct Caller end
+struct Gen{T} end
 end
 
 @testset "LoweredCodeUtils.jl" begin
@@ -34,6 +35,16 @@ end
                            return y <: Integer ? :(x*y) : :(x+y)
                        else
                            return 2x+3y
+                       end
+                   end
+               end,
+               # Generated constructors
+               quote
+                   function Gen{T}(x) where T
+                       if @generated
+                           return T <: Integer ? :(x^2) : :(2x)
+                       else
+                           return 7x
                        end
                    end
                end,
@@ -92,6 +103,8 @@ end
     @test Lowering.fctrue(0) == 1
     @test_throws UndefVarError Lowering.fcfalse(0)
     @test (Lowering.Caller())("Hello, world") == 12
+    g = Lowering.Gen{Float64}
+    @test g(3) == 6
 
     # Don't be deceived by inner methods
     stack = JuliaStackFrame[]
