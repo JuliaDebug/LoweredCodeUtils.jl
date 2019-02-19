@@ -35,7 +35,7 @@ module Lowering end
                    end
                end)
         Core.eval(Lowering, ex)
-        frame = JuliaInterpreter.prepare_toplevel(Lowering, ex)
+        frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
         methoddef!(signatures, stack, frame)
         push!(newcode, frame.code.code)
     end
@@ -82,14 +82,14 @@ module Lowering end
         end
     end
     Core.eval(Lowering, ex)
-    frame = JuliaInterpreter.prepare_toplevel(Lowering, ex)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
     methoddef!(signatures, stack, frame)
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
 
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
-    frame = JuliaInterpreter.prepare_toplevel(Base, ex)
+    frame = JuliaInterpreter.prepare_thunk(Base, ex)
     signatures = Set{Any}()
     methoddef!(signatures, stack, frame)
     @test length(signatures) == 1
