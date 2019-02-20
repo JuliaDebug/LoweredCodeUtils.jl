@@ -1,8 +1,12 @@
 using LoweredCodeUtils, JuliaInterpreter
 using Core: CodeInfo
+using Base.Meta: isexpr
 using Test
 
-module Lowering end
+module Lowering
+struct Caller end
+struct Gen{T} end
+end
 
 @testset "LoweredCodeUtils.jl" begin
     stack = JuliaStackFrame[]
@@ -33,12 +37,37 @@ module Lowering end
                            return 2x+3y
                        end
                    end
-               end)
+               end,
+               # Generated constructors
+               quote
+                   function Gen{T}(x) where T
+                       if @generated
+                           return T <: Integer ? :(x^2) : :(2x)
+                       else
+                           return 7x
+                       end
+                   end
+               end,
+               # Conditional methods
+               quote
+                   if 0.8 > 0.2
+                       fctrue(x) = 1
+                   else
+                       fcfalse(x) = 1
+                   end
+               end,
+               # Call methods
+               :((::Caller)(x::String) = length(x)),
+               )
         Core.eval(Lowering, ex)
-        frame = JuliaInterpreter.prepare_toplevel(Lowering, ex)
-        methoddef!(signatures, stack, frame)
+        frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+        pc = methoddefs!(signatures, stack, frame)
         push!(newcode, frame.code.code)
     end
+
+    # Manually add the signature for the Caller constructor, since that was defined
+    # outside of manual lowering
+    push!(signatures, Tuple{Type{Lowering.Caller}})
 
     nms = names(Lowering; all=true)
     modeval, modinclude = getfield(Lowering, :eval), getfield(Lowering, :include)
@@ -71,6 +100,11 @@ module Lowering end
     @test Lowering.h(2.0) == 2.0
     @test Lowering.h(2, 3) == 6
     @test Lowering.h(2, 3.0) == 5.0
+    @test Lowering.fctrue(0) == 1
+    @test_throws UndefVarError Lowering.fcfalse(0)
+    @test (Lowering.Caller())("Hello, world") == 12
+    g = Lowering.Gen{Float64}
+    @test g(3) == 6
 
     # Don't be deceived by inner methods
     stack = JuliaStackFrame[]
@@ -82,8 +116,16 @@ module Lowering end
         end
     end
     Core.eval(Lowering, ex)
-    frame = JuliaInterpreter.prepare_toplevel(Lowering, ex)
-    methoddef!(signatures, stack, frame)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    methoddefs!(signatures, stack, frame)
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
+
+    # Anonymous functions in method signatures
+    ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
+    frame = JuliaInterpreter.prepare_thunk(Base, ex)
+    signatures = Set{Any}()
+    methoddef!(signatures, stack, frame)
+    @test length(signatures) == 1
+    @test first(signatures) == which(Base.max_values, Tuple{Type{Int16}}).sig
 end

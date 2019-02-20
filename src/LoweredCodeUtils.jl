@@ -1,11 +1,11 @@
 module LoweredCodeUtils
 
-using Core: SimpleVector, CodeInfo
+using Core: SimpleVector, CodeInfo, SSAValue
 using Base.Meta: isexpr
 using JuliaInterpreter
-using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!
+using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!, isglobalref
 
-export whichtt, signature, methoddef!
+export whichtt, signature, methoddef!, methoddefs!
 
 """
     method = whichtt(tt)
@@ -27,7 +27,7 @@ function iscallto(stmt, name)
     if isexpr(stmt, :call)
         a = stmt.args[1]
         a == name && return true
-        return isa(a, GlobalRef) && a.mod == Core && a.name == :_apply && stmt.args[2] == name
+        return isglobalref(a, Core, :_apply) && stmt.args[2] == name
     end
     return false
 end
@@ -40,11 +40,15 @@ Returns the function (or Symbol) being called in a :call expression.
 function getcallee(stmt)
     if isexpr(stmt, :call)
         a = stmt.args[1]
-        isa(a, GlobalRef) && a.mod == Core && a.name == :_apply && return stmt.args[2]
+        isglobalref(a, Core, :_apply) && return stmt.args[2]
         return a
     end
     error(stmt, " is not a call expression")
 end
+
+ismethod(stmt)  = isexpr(stmt, :method)
+ismethod1(stmt) = isexpr(stmt, :method, 1)
+ismethod3(stmt) = isexpr(stmt, :method, 3)
 
 """
     nextpc = next_or_nothing(frame, pc)
@@ -68,6 +72,22 @@ function skip_until(predicate, frame, pc)
     return pc
 end
 
+"""
+    sig = signature(sigsv::SimpleVector)
+
+Compute a method signature from a suitable `SimpleVector`: `sigsv[1]` holds the signature
+and `sigsv[2]` the `TypeVar`s.
+
+# Example:
+
+For `f(x::AbstractArray{T}) where T`, the corresponding `sigsv` is constructed as
+
+    T = TypeVar(:T)
+    sig1 = Core.svec(typeof(f), AbstractArray{T})
+    sig2 = Core.svec(T)
+    sigsv = Core.svec(sig1, sig2)
+    sig = signature(sigsv)
+"""
 function signature(sigsv::SimpleVector)
     sigp, sigtv = sigsv
     sig = Tuple{sigp...}
@@ -93,9 +113,13 @@ If no 3-argument `:method` expression is found, `sigt` will be `nothing`.
 function signature(stack, frame, stmt, pc::JuliaProgramCounter)
     lastpc = pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
-        lastpc = pc
-        pc = _step_expr!(stack, frame, stmt, pc, true)
-        pc === nothing && return nothing, lastpc
+        if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
+            lastpc = pc = define_anonymous(stack, frame, stmt, pc)
+        else
+            lastpc = pc
+            pc = _step_expr!(stack, frame, stmt, pc, true)
+            pc === nothing && return nothing, lastpc
+        end
         stmt = pc_expr(frame, pc)
     end
     sigsv = @lookup(frame, stmt.args[2])::SimpleVector
@@ -103,6 +127,43 @@ function signature(stack, frame, stmt, pc::JuliaProgramCounter)
     return sigt, lastpc
 end
 signature(stack, frame, pc::JuliaProgramCounter) = signature(stack, frame, pc_expr(frame, pc), pc)
+
+function minid(node, stmts, id)
+    if isa(node, SSAValue)
+        id = min(id, node.id)
+        stmt = stmts[node.id]
+        return minid(stmt, stmts, id)
+    elseif isa(node, Expr)
+        for a in node.args
+            id = minid(a, stmts, id)
+        end
+    end
+    return id
+end
+
+function signature_top(frame, stmt, pc)
+    @assert ismethod3(stmt)
+    return JuliaProgramCounter(minid(stmt.args[2], frame.code.code.code, convert(Int, pc)))
+end
+
+##
+## Detecting anonymous functions. These start with a :thunk expr and have a characteristic CodeInfo
+##
+function isanonymous_typedef(code::CodeInfo)
+    length(code.code) >= 4 || return false
+    stmt = code.code[end-1]
+    isexpr(stmt, :struct_type) || return false
+    name = stmt.args[1]::Symbol
+    return startswith(String(name), "#")
+end
+
+function define_anonymous(stack, frame, stmt, pc)
+    while !isexpr(stmt, :method)
+        pc = _step_expr!(stack, frame, stmt, pc, true)
+        stmt = pc_expr(frame, pc)
+    end
+    return _step_expr!(stack, frame, stmt, pc, true)  # also define the method
+end
 
 ##
 ## Deal with gensymmed names, https://github.com/JuliaLang/julia/issues/30908
@@ -140,37 +201,25 @@ a keyword or generated method.
 """
 function find_corrected_name(frame, pc, name, parentname)
     stmt = pc_expr(frame, pc)
-    while !isexpr(stmt, :method, 1) || stmt.args[1] != parentname
-        isexpr(stmt, :method, 1) && stmt.args[1] != name && break
-        pc += 1
-        stmt = pc_expr(frame, pc)
-    end
-    pctop = pc # keep track of the beginning of the signature
-    if stmt.args[1] != name && stmt.args[1] != parentname
-        # This might be the GeneratedFunctionStub for a @generated method
-        newname = stmt.args[1]
-        while !isexpr(stmt, :method, 3) || stmt.args[1] != newname
-            pc += 1
+    while true
+        while !ismethod3(stmt)
+            pc = next_or_nothing(frame, pc)
+            pc === nothing && return nothing
             stmt = pc_expr(frame, pc)
         end
         body = stmt.args[3]
-        bodystmt = body.code[1]
-        (isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated) || return nothing
-        return pctop, true
-    else
-        # Keyword arg function
-        while true
-            while !isexpr(stmt, :method, 3) || stmt.args[1] != parentname
-                pc += 1
-                stmt = pc_expr(frame, pc)
-            end
-            body = stmt.args[3]
+        if stmt.args[1] != name && stmt.args[1] != parentname
+            # This might be the GeneratedFunctionStub for a @generated method
+            bodystmt = body.code[1]
+            (isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated) || return nothing
+            return signature_top(frame, stmt, pc), true
+        elseif length(body.code) > 1
             bodystmt = body.code[end-1]  # the line before the final return
-            iscallto(bodystmt, name) && return pctop, false
-            pc += 1
-            pctop = pc
-            stmt = pc_expr(frame, pc)
+            iscallto(bodystmt, name) && return signature_top(frame, stmt, pc), false
         end
+        pc = next_or_nothing(frame, pc)
+        pc === nothing && return nothing
+        stmt = pc_expr(frame, pc)
     end
 end
 
@@ -225,64 +274,103 @@ function correct_name!(stack, frame, pc, name, parentname)
             cname = ref.name
         end
         # Swap in the correct name
-        replacename!(frame.code.code.code, name=>cname)
-        name = parentname = pc_expr(frame, pctop).args[1]
+        if name != cname
+            replacename!(frame.code.code.code, name=>cname)
+        end
+        name = pc_expr(frame, pctop).args[1]
     end
-    return name, parentname, pc
+    return name, pc
 end
 
 """
-    linespan, pc = methoddef!(signatures, stack, frame, pc)
+    pc = methoddef!(signatures, stack, frame, pc)
 
-Collect all signatures and return the span of all the methods generated by a single definition
-(including default-args and keyword-arg methods). `pc` should point to a 1-argument
-`:method` expression.
+Compute the signature of a method definition. `pc` should point to a
+`:method` expression. Upon exit, the new signature will be added to `signatures`.
+`pc` will point to the next statement to be executed, or be `nothing` if there are no
+further statements in `frame`.
+
+An important point is that `methoddef!` may, in some circumstances, change the names
+of methods in `frame`.  The issues are described in https://github.com/JuliaLang/julia/issues/30908.
+`methoddef!` will try to replace names with the ones that are currently active.
 """
 function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter)
-    isexpr(stmt, :method) || isexpr(stmt, :struct_type) || error("expected method, got ", stmt)
+    if ismethod3(stmt)
+        sigt, pc = signature(stack, frame, stmt, pc)
+        meth = whichtt(sigt)
+        if isa(meth, Method)
+            push!(signatures, meth.sig)
+        else
+            # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
+            code = frame.code.code
+            loc = code.linetable[code.codelocs[convert(Int, pc)]]
+            @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
+        end
+        return next_or_nothing(frame, pc)
+    end
+    ismethod1(stmt) || error("expected method opening, got ", stmt)
     name = stmt.args[1]
     if isa(name, Bool)
-        parentname = name
-    else
-        parentname = get_parentname(name)  # e.g., name = #foo#7 and parentname = foo
+        error("not valid for anonymous methods")
     end
-    firstidx = convert(Int, pc)
-    codelocs = frame.code.code.codelocs  # methods from the same definition have the same starting line number
-    srcloc = codelocs[firstidx]          # ...though we also need to check names
-    local lastidx
-    while true
-        if isexpr(stmt, :method) && length(stmt.args) == 1 && name != parentname
-            if get_parentname(name) != parentname
-                # We've moved on to a new method. If this gets triggered you probably
-                # need to be splitting more before lowering, but it's safer to have this.
-                @warn "split $frame"
-                return firstidx:lastidx, pc
-            end
-            name, parentname, pc = correct_name!(stack, frame, pc, name, parentname)
-        end
+    parentname = get_parentname(name)  # e.g., name = #foo#7 and parentname = foo
+    nextstmt = pc_expr(frame, pc+1)
+    if ismethod1(nextstmt)
+        name = nextstmt.args[1]
+    end
+    if name != parentname
+        name, endpc = correct_name!(stack, frame, pc, name, parentname)
+    end
+    while true  # methods containing inner methods may need multiple trips through this loop
         sigt, pc = signature(stack, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
-            lastidx = convert(Int, pc)
             pc = next_or_nothing(frame, pc)
-            pc === nothing && return firstidx:lastidx, pc
+            pc === nothing && return pc
             stmt = pc_expr(frame, pc)
         end
-        lastidx = convert(Int, pc)
-        sigt === nothing && return firstidx:lastidx, next_or_nothing(frame, pc)
+        name3 = stmt.args[1]
+        sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc))
+        # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
+        # signature of the active method. So let's get the active signature.
         meth = whichtt(sigt)
-        isa(meth, Method) && push!(signatures, meth.sig)
+        isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
         pc = next_or_nothing(frame, pc)
-        pc === nothing && return firstidx:lastidx, pc
-        stmt = pc_expr(frame, pc)
+        name == name3 && break     # if this was an inner method we should keep going
+        stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
+    return pc
 end
 methoddef!(signatures, stack, frame, pc::JuliaProgramCounter) =
     methoddef!(signatures, stack, frame, pc_expr(frame, pc), pc)
 function methoddef!(signatures, stack, frame)
     pc = frame.pc[]
-    pc = skip_until(stmt->isexpr(stmt, :method, 1), frame, pc)
+    stmt = pc_expr(frame, pc)
+    if !ismethod(stmt)
+        pc = JuliaInterpreter.next_until!(ismethod, stack, frame, pc, true)
+    end
     methoddef!(signatures, stack, frame, pc)
+end
+
+function methoddefs!(signatures, stack, frame)
+    pc = methoddef!(signatures, stack, frame)
+    return _methoddefs!(signatures, stack, frame, pc)
+end
+function methoddefs!(signatures, stack, frame, pc::JuliaProgramCounter)
+    pc = methoddef!(signatures, stack, frame, pc)
+    return _methoddefs!(signatures, stack, frame, pc)
+end
+
+function _methoddefs!(signatures, stack, frame, pc)
+    while pc !== nothing
+        stmt = pc_expr(frame, pc)
+        if !ismethod(stmt)
+            pc = JuliaInterpreter.next_until!(ismethod, stack, frame, pc, true)
+        end
+        pc === nothing && break
+        pc = methoddef!(signatures, stack, frame, pc)
+    end
+    return pc
 end
 
 end # module
