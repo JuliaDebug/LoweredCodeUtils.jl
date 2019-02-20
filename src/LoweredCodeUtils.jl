@@ -3,7 +3,7 @@ module LoweredCodeUtils
 using Core: SimpleVector, CodeInfo, SSAValue
 using Base.Meta: isexpr
 using JuliaInterpreter
-using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!
+using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!, isglobalref
 
 export whichtt, signature, methoddef!, methoddefs!
 
@@ -27,7 +27,7 @@ function iscallto(stmt, name)
     if isexpr(stmt, :call)
         a = stmt.args[1]
         a == name && return true
-        return isa(a, GlobalRef) && a.mod == Core && a.name == :_apply && stmt.args[2] == name
+        return isglobalref(a, Core, :_apply) && stmt.args[2] == name
     end
     return false
 end
@@ -40,7 +40,7 @@ Returns the function (or Symbol) being called in a :call expression.
 function getcallee(stmt)
     if isexpr(stmt, :call)
         a = stmt.args[1]
-        isa(a, GlobalRef) && a.mod == Core && a.name == :_apply && return stmt.args[2]
+        isglobalref(a, Core, :_apply) && return stmt.args[2]
         return a
     end
     error(stmt, " is not a call expression")
