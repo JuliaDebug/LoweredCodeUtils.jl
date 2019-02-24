@@ -61,7 +61,7 @@ end
                )
         Core.eval(Lowering, ex)
         frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
-        pc = methoddefs!(signatures, stack, frame)
+        pc = methoddefs!(signatures, stack, frame; define=false)
         push!(newcode, frame.code.code)
     end
 
@@ -107,7 +107,7 @@ end
     @test g(3) == 6
 
     # Don't be deceived by inner methods
-    stack = JuliaStackFrame[]
+    empty!(stack)
     signatures = []
     ex = quote
         function fouter(x)
@@ -117,7 +117,7 @@ end
     end
     Core.eval(Lowering, ex)
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
-    methoddefs!(signatures, stack, frame)
+    methoddefs!(signatures, stack, frame; define=false)
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
 
@@ -129,14 +129,27 @@ end
     stmt = JuliaInterpreter.pc_expr(frame, pc)
     name = stmt.args[1]
     parentname = LoweredCodeUtils.get_parentname(name)
-    name, pc = LoweredCodeUtils.correct_name!(JuliaStackFrame[], frame, pc, name, parentname)
+    name, pc = LoweredCodeUtils.correct_name!(empty!(stack), frame, pc, name, parentname)
     @test name == parentname
 
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
     frame = JuliaInterpreter.prepare_thunk(Base, ex)
     signatures = Set{Any}()
-    methoddef!(signatures, stack, frame)
+    methoddef!(signatures, stack, frame; define=false)
     @test length(signatures) == 1
     @test first(signatures) == which(Base.max_values, Tuple{Type{Int16}}).sig
+
+    # define
+    ex = :(fdefine(x) = 1)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    empty!(signatures)
+    empty!(stack)
+    methoddefs!(signatures, stack, frame; define=false)
+    @test_throws MethodError Lowering.fdefine(0)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    empty!(signatures)
+    empty!(stack)
+    methoddefs!(signatures, stack, frame; define=true)
+    @test Lowering.fdefine(0) == 1
 end

@@ -53,7 +53,8 @@ ismethod3(stmt) = isexpr(stmt, :method, 3)
 """
     nextpc = next_or_nothing(frame, pc)
 
-Advance the program counter. If `frame` is finished, `nextpc` will be `nothing`.
+Advance the program counter without executing the corresponding line.
+If `frame` is finished, `nextpc` will be `nothing`.
 """
 next_or_nothing(frame, pc) = convert(Int, pc) < length(frame.code.code.code) ? pc+1 : nothing
 
@@ -283,18 +284,21 @@ function correct_name!(stack, frame, pc, name, parentname)
 end
 
 """
-    pc = methoddef!(signatures, stack, frame, pc)
+    pc = methoddef!(signatures, stack, frame, pc; define=true)
 
 Compute the signature of a method definition. `pc` should point to a
 `:method` expression. Upon exit, the new signature will be added to `signatures`.
 `pc` will point to the next statement to be executed, or be `nothing` if there are no
 further statements in `frame`.
 
+By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
+This is recommended if you are simply extracting signatures from code that has already been evaluated.
+
 An important point is that `methoddef!` may, in some circumstances, change the names
 of methods in `frame`.  The issues are described in https://github.com/JuliaLang/julia/issues/30908.
 `methoddef!` will try to replace names with the ones that are currently active.
 """
-function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter)
+function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; define=true)
     if ismethod3(stmt)
         sigt, pc = signature(stack, frame, stmt, pc)
         meth = whichtt(sigt)
@@ -306,7 +310,7 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter)
             loc = code.linetable[code.codelocs[convert(Int, pc)]]
             @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
         end
-        return next_or_nothing(frame, pc)
+        return define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc)
     end
     ismethod1(stmt) || error("expected method opening, got ", stmt)
     name = stmt.args[1]
@@ -335,40 +339,40 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter)
         # signature of the active method. So let's get the active signature.
         meth = whichtt(sigt)
         isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
-        pc = next_or_nothing(frame, pc)
+        pc = define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc)
         name == name3 && break     # if this was an inner method we should keep going
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
     return pc
 end
-methoddef!(signatures, stack, frame, pc::JuliaProgramCounter) =
-    methoddef!(signatures, stack, frame, pc_expr(frame, pc), pc)
-function methoddef!(signatures, stack, frame)
+methoddef!(signatures, stack, frame, pc::JuliaProgramCounter; define=true) =
+    methoddef!(signatures, stack, frame, pc_expr(frame, pc), pc; define=define)
+function methoddef!(signatures, stack, frame; define=true)
     pc = frame.pc[]
     stmt = pc_expr(frame, pc)
     if !ismethod(stmt)
         pc = JuliaInterpreter.next_until!(ismethod, stack, frame, pc, true)
     end
-    methoddef!(signatures, stack, frame, pc)
+    methoddef!(signatures, stack, frame, pc; define=define)
 end
 
-function methoddefs!(signatures, stack, frame)
-    pc = methoddef!(signatures, stack, frame)
-    return _methoddefs!(signatures, stack, frame, pc)
+function methoddefs!(signatures, stack, frame; define=true)
+    pc = methoddef!(signatures, stack, frame; define=define)
+    return _methoddefs!(signatures, stack, frame, pc; define=define)
 end
-function methoddefs!(signatures, stack, frame, pc::JuliaProgramCounter)
-    pc = methoddef!(signatures, stack, frame, pc)
-    return _methoddefs!(signatures, stack, frame, pc)
+function methoddefs!(signatures, stack, frame, pc::JuliaProgramCounter; define=true)
+    pc = methoddef!(signatures, stack, frame, pc; define=define)
+    return _methoddefs!(signatures, stack, frame, pc; define=define)
 end
 
-function _methoddefs!(signatures, stack, frame, pc)
+function _methoddefs!(signatures, stack, frame, pc; define=define)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
             pc = JuliaInterpreter.next_until!(ismethod, stack, frame, pc, true)
         end
         pc === nothing && break
-        pc = methoddef!(signatures, stack, frame, pc)
+        pc = methoddef!(signatures, stack, frame, pc; define=define)
     end
     return pc
 end
