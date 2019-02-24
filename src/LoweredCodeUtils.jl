@@ -277,7 +277,7 @@ function correct_name!(stack, frame, pc, name, parentname)
         if name != cname
             replacename!(frame.code.code.code, name=>cname)
         end
-        name = pc_expr(frame, pctop).args[1]
+        name = pc_expr(frame, pctop-1).args[1]
     end
     return name, pc
 end

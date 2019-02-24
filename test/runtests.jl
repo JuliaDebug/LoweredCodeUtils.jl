@@ -121,6 +121,17 @@ end
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
 
+    # Check positioning in correct_name!
+    ex = :(g(x::Int8; y=0) = y)
+    Core.eval(Lowering, ex)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    pc = frame.pc[]
+    stmt = JuliaInterpreter.pc_expr(frame, pc)
+    name = stmt.args[1]
+    parentname = LoweredCodeUtils.get_parentname(name)
+    name, pc = LoweredCodeUtils.correct_name!(JuliaStackFrame[], frame, pc, name, parentname)
+    @test name == parentname
+
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
     frame = JuliaInterpreter.prepare_thunk(Base, ex)
