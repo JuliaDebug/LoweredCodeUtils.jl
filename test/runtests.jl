@@ -132,6 +132,16 @@ end
     name, pc = LoweredCodeUtils.correct_name!(empty!(stack), frame, pc, name, parentname)
     @test name == parentname
 
+    # Check output of methoddef!
+    frame = JuliaInterpreter.prepare_thunk(Lowering, :(function nomethod end))
+    ret = methoddef!(empty!(signatures), empty!(stack), frame; define=true)
+    @test isempty(signatures)
+    @test ret === nothing
+    frame = JuliaInterpreter.prepare_thunk(Lowering, :(function amethod() nothing end))
+    ret = methoddef!(empty!(signatures), empty!(stack), frame; define=true)
+    @test !isempty(signatures)
+    @test isa(ret, NTuple{2,JuliaInterpreter.JuliaProgramCounter})
+
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
     frame = JuliaInterpreter.prepare_thunk(Base, ex)

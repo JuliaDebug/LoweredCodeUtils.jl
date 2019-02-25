@@ -284,12 +284,24 @@ function correct_name!(stack, frame, pc, name, parentname)
 end
 
 """
-    pc = methoddef!(signatures, stack, frame, pc; define=true)
+    ret = methoddef!(signatures, stack, frame, pc; define=true)
 
 Compute the signature of a method definition. `pc` should point to a
 `:method` expression. Upon exit, the new signature will be added to `signatures`.
-`pc` will point to the next statement to be executed, or be `nothing` if there are no
-further statements in `frame`.
+
+There are several possible return values:
+
+    pc, pc3 = ret
+
+is the typical return. `pc` will point to the next statement to be executed, or be `nothing`
+if there are no further statements in `frame`. `pc3` will point to the 3-argument `:method`
+expression.
+
+Alternatively,
+
+    pc = ret
+
+occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be `nothing`.
 
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
@@ -300,6 +312,7 @@ of methods in `frame`.  The issues are described in https://github.com/JuliaLang
 """
 function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; define=true)
     if ismethod3(stmt)
+        pc3 = pc
         sigt, pc = signature(stack, frame, stmt, pc)
         meth = whichtt(sigt)
         if isa(meth, Method)
@@ -310,7 +323,7 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; def
             loc = code.linetable[code.codelocs[convert(Int, pc)]]
             @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
         end
-        return define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc)
+        return ( define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc) ), pc3
     end
     ismethod1(stmt) || error("expected method opening, got ", stmt)
     name = stmt.args[1]
@@ -329,21 +342,21 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; def
         sigt, pc = signature(stack, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
-            pc = next_or_nothing(frame, pc)
-            pc === nothing && return pc
+            pc = next_or_nothing(frame, pc)  # this should not check define, we've probably already done this once
+            pc === nothing && return pc   # this was just `function foo end`, signal "no def"
             stmt = pc_expr(frame, pc)
         end
+        pc3 = pc
         name3 = stmt.args[1]
-        sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc))
+        sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
+        pc = define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc)
         meth = whichtt(sigt)
         isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
-        pc = define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc)
-        name == name3 && break     # if this was an inner method we should keep going
+        name == name3 && return pc, pc3     # if this was an inner method we should keep going
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
-    return pc
 end
 methoddef!(signatures, stack, frame, pc::JuliaProgramCounter; define=true) =
     methoddef!(signatures, stack, frame, pc_expr(frame, pc), pc; define=define)
@@ -357,11 +370,13 @@ function methoddef!(signatures, stack, frame; define=true)
 end
 
 function methoddefs!(signatures, stack, frame; define=true)
-    pc = methoddef!(signatures, stack, frame; define=define)
+    ret = methoddef!(signatures, stack, frame; define=define)
+    pc = ret === nothing ? ret : ret[1]
     return _methoddefs!(signatures, stack, frame, pc; define=define)
 end
 function methoddefs!(signatures, stack, frame, pc::JuliaProgramCounter; define=true)
-    pc = methoddef!(signatures, stack, frame, pc; define=define)
+    ret = methoddef!(signatures, stack, frame, pc; define=define)
+    pc = ret === nothing ? ret : ret[1]
     return _methoddefs!(signatures, stack, frame, pc; define=define)
 end
 
@@ -372,7 +387,8 @@ function _methoddefs!(signatures, stack, frame, pc; define=define)
             pc = JuliaInterpreter.next_until!(ismethod, stack, frame, pc, true)
         end
         pc === nothing && break
-        pc = methoddef!(signatures, stack, frame, pc; define=define)
+        ret = methoddef!(signatures, stack, frame, pc; define=define)
+        pc = ret === nothing ? ret : ret[1]
     end
     return pc
 end
