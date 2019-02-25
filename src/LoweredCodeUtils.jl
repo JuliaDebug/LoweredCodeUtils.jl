@@ -261,7 +261,8 @@ function correct_name!(stack, frame, pc, name, parentname)
     else
         pctop, isgen = nameinfo
         sigtparent, lastpcparent = signature(stack, frame, pctop)
-        methparent = whichtt(sigtparent)::Method
+        methparent = whichtt(sigtparent)
+        methparent === nothing && return name, pc  # caller isn't defined, no correction is needed
         if isgen
             cname = nameof(methparent.generator.gen)
         else
