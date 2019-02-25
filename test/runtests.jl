@@ -127,7 +127,7 @@ end
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
     pc = frame.pc[]
     stmt = JuliaInterpreter.pc_expr(frame, pc)
-    name = stmt.args[1]
+    name = LoweredCodeUtils.methodname(stmt.args[1])
     parentname = LoweredCodeUtils.get_parentname(name)
     name, pc = LoweredCodeUtils.correct_name!(empty!(stack), frame, pc, name, parentname)
     @test name == parentname

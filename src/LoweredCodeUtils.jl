@@ -50,6 +50,14 @@ ismethod(stmt)  = isexpr(stmt, :method)
 ismethod1(stmt) = isexpr(stmt, :method, 1)
 ismethod3(stmt) = isexpr(stmt, :method, 3)
 
+function methodname(name)
+    isa(name, Symbol) && return name
+    if isa(name, CodeInfo) && length(name.code) == 1 && isexpr(name.code[1], :return) && ismethod1(name.code[1].args[1])
+        return name.code[1].args[1].args[1]
+    end
+    error("unhandled name type ", typeof(name))
+end
+
 """
     nextpc = next_or_nothing(frame, pc)
 
@@ -174,6 +182,7 @@ end
 
 function get_parentname(name)
     isa(name, Expr) && return name
+    name = methodname(name)
     isa(name, Symbol) || error("unhandled name type ", typeof(name))
     namestring = String(name)
     if namestring[1] == '#'
