@@ -168,4 +168,30 @@ end
     empty!(stack)
     methoddefs!(signatures, stack, frame; define=true)
     @test Lowering.fdefine(0) == 1
+
+    # Test for correct exit (example from base/namedtuples.jl)
+    ex = quote
+        function merge(a::NamedTuple{an}, b::NamedTuple{bn}) where {an, bn}
+            if @generated
+                names = merge_names(an, bn)
+                types = merge_types(names, a, b)
+                vals = Any[ :(getfield($(sym_in(n, bn) ? :b : :a), $(QuoteNode(n)))) for n in names ]
+                :( NamedTuple{$names,$types}(($(vals...),)) )
+            else
+                names = merge_names(an, bn)
+                types = merge_types(names, typeof(a), typeof(b))
+                NamedTuple{names,types}(map(n->getfield(sym_in(n, bn) ? b : a, n), names))
+            end
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    empty!(signatures)
+    empty!(stack)
+    pc = frame.pc[]
+    stmt = JuliaInterpreter.pc_expr(frame, pc)
+    if !LoweredCodeUtils.ismethod(stmt)
+        pc = JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod, stack, frame, pc, true)
+    end
+    pc, pc3 = methoddef!(signatures, stack, frame; define=true)  # this tests that the return isn't `nothing`
+    @test length(signatures) == 2  # both the GeneratedFunctionStub and the main method
 end

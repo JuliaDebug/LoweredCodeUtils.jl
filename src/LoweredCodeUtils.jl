@@ -289,7 +289,13 @@ function correct_name!(stack, frame, pc, name, parentname)
         if name != cname
             replacename!(frame.code.code.code, name=>cname)
         end
-        name = pc_expr(frame, pctop-1).args[1]
+        stmt = pc_expr(frame, lastpcparent)
+        while !ismethod(stmt)
+            lastpcparent = next_or_nothing(frame, lastpcparent)
+            lastpcparent === nothing && return name, lastpcparent
+            stmt = pc_expr(frame, lastpcparent)
+        end
+        name = stmt.args[1]
     end
     return name, pc
 end
@@ -332,7 +338,7 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; def
             # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
             code = frame.code.code
             loc = code.linetable[code.codelocs[convert(Int, pc)]]
-            ft = sigt.parameters[1]
+            ft = Base.unwrap_unionall(sigt).parameters[1]
             if !startswith(String(ft.name.name), "##")
                 @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
             end
