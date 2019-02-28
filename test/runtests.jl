@@ -17,8 +17,12 @@ end
                :(f(x::Int32; y="hello", z::Int=0) = 3),
                :(f(x::Int64;) = 4),
                :(f(x::Array{Float64,K}; y::Int=0) where K = K),
+               # Keyword-arg functions that have an anonymous function inside
+               :(fanon(list; sorted::Bool=true,) = sorted ? sort!(list, by=x->abs(x)) : list),
                # Keyword & default positional args
                :(g(x, y="hello"; z::Int=0) = 1),
+               # Return type annotations
+               :(annot(x, y; z::Bool=false,)::Nothing = nothing),
                # Generated methods
                quote
                    @generated function h(x)
@@ -95,7 +99,9 @@ end
     @test Lowering.f(Int32(0)) == Lowering.f(Int32(0); y=22) == Lowering.f(Int32(0); y=:cat, z=5) == 3
     @test Lowering.f(Int64(0)) == 4
     @test Lowering.f(rand(3,3)) == Lowering.f(rand(3,3); y=5) == 2
+    @test Lowering.fanon([1,3,-2]) == [1,-2,3]
     @test Lowering.g(0) == Lowering.g(0,"LCU") == Lowering.g(0; z=5) == Lowering.g(0,"LCU"; z=5) == 1
+    @test Lowering.annot(0,0) === nothing
     @test Lowering.h(2) == 4
     @test Lowering.h(2.0) == 2.0
     @test Lowering.h(2, 3) == 6

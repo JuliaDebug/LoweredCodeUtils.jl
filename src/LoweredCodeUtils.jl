@@ -221,8 +221,9 @@ function find_corrected_name(frame, pc, name, parentname)
         if stmt.args[1] != name && stmt.args[1] != parentname
             # This might be the GeneratedFunctionStub for a @generated method
             bodystmt = body.code[1]
-            (isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated) || return nothing
-            return signature_top(frame, stmt, pc), true
+            if isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated
+                return signature_top(frame, stmt, pc), true
+            end
         elseif length(body.code) > 1
             bodystmt = body.code[end-1]  # the line before the final return
             iscallto(bodystmt, name) && return signature_top(frame, stmt, pc), false
@@ -331,7 +332,10 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; def
             # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
             code = frame.code.code
             loc = code.linetable[code.codelocs[convert(Int, pc)]]
-            @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
+            ft = sigt.parameters[1]
+            if !startswith(String(ft.name.name), "##")
+                @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
+            end
         end
         return ( define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc) ), pc3
     end
