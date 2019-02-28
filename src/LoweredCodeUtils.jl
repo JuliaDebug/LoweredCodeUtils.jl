@@ -221,8 +221,9 @@ function find_corrected_name(frame, pc, name, parentname)
         if stmt.args[1] != name && stmt.args[1] != parentname
             # This might be the GeneratedFunctionStub for a @generated method
             bodystmt = body.code[1]
-            (isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated) || return nothing
-            return signature_top(frame, stmt, pc), true
+            if isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated
+                return signature_top(frame, stmt, pc), true
+            end
         elseif length(body.code) > 1
             bodystmt = body.code[end-1]  # the line before the final return
             iscallto(bodystmt, name) && return signature_top(frame, stmt, pc), false
