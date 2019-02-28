@@ -332,7 +332,10 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; def
             # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
             code = frame.code.code
             loc = code.linetable[code.codelocs[convert(Int, pc)]]
-            @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
+            ft = sigt.parameters[1]
+            if !startswith(String(ft.name.name), "##")
+                @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
+            end
         end
         return ( define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc) ), pc3
     end
