@@ -413,4 +413,20 @@ function _methoddefs!(signatures, stack, frame, pc; define=define)
     return pc
 end
 
+# precompilation
+
+if ccall(:jl_generating_output, Cint, ()) == 1
+    kwdefine = NamedTuple{(:define,),Tuple{Bool}}
+    for ct in (Vector{Any}, Set{Any})
+        f = methoddef!
+        precompile(Tuple{typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame, Expr, JuliaProgramCounter})
+        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame, Expr, JuliaProgramCounter})
+        f = methoddefs!
+        precompile(Tuple{typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame})
+        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame})
+    end
+    precompile(Tuple{typeof(get_parentname), Symbol})
+    precompile(Tuple{typeof(correct_name!), Vector{JuliaStackFrame}, JuliaStackFrame, JuliaProgramCounter, Symbol, Symbol})
+end
+
 end # module
