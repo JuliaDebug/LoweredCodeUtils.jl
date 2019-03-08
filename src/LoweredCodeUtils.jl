@@ -3,7 +3,7 @@ module LoweredCodeUtils
 using Core: SimpleVector, CodeInfo, SSAValue
 using Base.Meta: isexpr
 using JuliaInterpreter
-using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!, isglobalref
+using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!, is_global_ref
 
 export whichtt, signature, methoddef!, methoddefs!
 
@@ -27,7 +27,7 @@ function iscallto(stmt, name)
     if isexpr(stmt, :call)
         a = stmt.args[1]
         a == name && return true
-        return isglobalref(a, Core, :_apply) && stmt.args[2] == name
+        return is_global_ref(a, Core, :_apply) && stmt.args[2] == name
     end
     return false
 end
@@ -40,7 +40,7 @@ Returns the function (or Symbol) being called in a :call expression.
 function getcallee(stmt)
     if isexpr(stmt, :call)
         a = stmt.args[1]
-        isglobalref(a, Core, :_apply) && return stmt.args[2]
+        is_global_ref(a, Core, :_apply) && return stmt.args[2]
         return a
     end
     error(stmt, " is not a call expression")
@@ -411,6 +411,22 @@ function _methoddefs!(signatures, stack, frame, pc; define=define)
         pc = ret === nothing ? ret : ret[1]
     end
     return pc
+end
+
+# precompilation
+
+if ccall(:jl_generating_output, Cint, ()) == 1
+    kwdefine = NamedTuple{(:define,),Tuple{Bool}}
+    for ct in (Vector{Any}, Set{Any})
+        f = methoddef!
+        precompile(Tuple{typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame, Expr, JuliaProgramCounter})
+        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame, Expr, JuliaProgramCounter})
+        f = methoddefs!
+        precompile(Tuple{typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame})
+        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame})
+    end
+    precompile(Tuple{typeof(get_parentname), Symbol})
+    precompile(Tuple{typeof(correct_name!), Vector{JuliaStackFrame}, JuliaStackFrame, JuliaProgramCounter, Symbol, Symbol})
 end
 
 end # module
