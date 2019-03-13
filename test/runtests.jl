@@ -1,7 +1,10 @@
 using LoweredCodeUtils, JuliaInterpreter
+using JuliaInterpreter: finish_and_return!
 using Core: CodeInfo
 using Base.Meta: isexpr
 using Test
+
+@test isempty(detect_ambiguities(LoweredCodeUtils, JuliaInterpreter, Base, Core))
 
 module Lowering
 struct Caller end
@@ -9,7 +12,6 @@ struct Gen{T} end
 end
 
 @testset "LoweredCodeUtils.jl" begin
-    stack = JuliaStackFrame[]
     signatures = Set{Any}()
     newcode = CodeInfo[]
     for ex in (:(f(x::Int8; y=0) = y),
@@ -65,8 +67,8 @@ end
                )
         Core.eval(Lowering, ex)
         frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
-        pc = methoddefs!(signatures, stack, frame; define=false)
-        push!(newcode, frame.code.code)
+        pc = methoddefs!(signatures, frame; define=false)
+        push!(newcode, frame.framecode.src)
     end
 
     # Manually add the signature for the Caller constructor, since that was defined
@@ -113,7 +115,6 @@ end
     @test g(3) == 6
 
     # Don't be deceived by inner methods
-    empty!(stack)
     signatures = []
     ex = quote
         function fouter(x)
@@ -123,7 +124,7 @@ end
     end
     Core.eval(Lowering, ex)
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
-    methoddefs!(signatures, stack, frame; define=false)
+    methoddefs!(signatures, frame; define=false)
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
 
@@ -135,24 +136,24 @@ end
     stmt = JuliaInterpreter.pc_expr(frame, pc)
     name = LoweredCodeUtils.methodname(stmt.args[1])
     parentname = LoweredCodeUtils.get_parentname(name)
-    name, pc = LoweredCodeUtils.correct_name!(empty!(stack), frame, pc, name, parentname)
+    name, pc = LoweredCodeUtils.correct_name!(finish_and_return!, frame, pc, name, parentname)
     @test name == parentname
 
     # Check output of methoddef!
     frame = JuliaInterpreter.prepare_thunk(Lowering, :(function nomethod end))
-    ret = methoddef!(empty!(signatures), empty!(stack), frame; define=true)
+    ret = methoddef!(empty!(signatures), frame; define=true)
     @test isempty(signatures)
     @test ret === nothing
     frame = JuliaInterpreter.prepare_thunk(Lowering, :(function amethod() nothing end))
-    ret = methoddef!(empty!(signatures), empty!(stack), frame; define=true)
+    ret = methoddef!(empty!(signatures), frame; define=true)
     @test !isempty(signatures)
-    @test isa(ret, NTuple{2,JuliaInterpreter.JuliaProgramCounter})
+    @test isa(ret, NTuple{2,Int})
 
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
     frame = JuliaInterpreter.prepare_thunk(Base, ex)
     signatures = Set{Any}()
-    methoddef!(signatures, stack, frame; define=false)
+    methoddef!(signatures, frame; define=false)
     @test length(signatures) == 1
     @test first(signatures) == which(Base.max_values, Tuple{Type{Int16}}).sig
 
@@ -160,13 +161,11 @@ end
     ex = :(fdefine(x) = 1)
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
     empty!(signatures)
-    empty!(stack)
-    methoddefs!(signatures, stack, frame; define=false)
+    methoddefs!(signatures, frame; define=false)
     @test_throws MethodError Lowering.fdefine(0)
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
     empty!(signatures)
-    empty!(stack)
-    methoddefs!(signatures, stack, frame; define=true)
+    methoddefs!(signatures, frame; define=true)
     @test Lowering.fdefine(0) == 1
 
     # Test for correct exit (example from base/namedtuples.jl)
@@ -186,12 +185,10 @@ end
     end
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
     empty!(signatures)
-    empty!(stack)
-    pc = frame.pc[]
-    stmt = JuliaInterpreter.pc_expr(frame, pc)
+    stmt = JuliaInterpreter.pc_expr(frame)
     if !LoweredCodeUtils.ismethod(stmt)
-        pc = JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod, stack, frame, pc, true)
+        pc = JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod, frame, true)
     end
-    pc, pc3 = methoddef!(signatures, stack, frame; define=true)  # this tests that the return isn't `nothing`
+    pc, pc3 = methoddef!(signatures, frame; define=true)  # this tests that the return isn't `nothing`
     @test length(signatures) == 2  # both the GeneratedFunctionStub and the main method
 end

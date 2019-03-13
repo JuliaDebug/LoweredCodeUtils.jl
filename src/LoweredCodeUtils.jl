@@ -3,20 +3,10 @@ module LoweredCodeUtils
 using Core: SimpleVector, CodeInfo, SSAValue
 using Base.Meta: isexpr
 using JuliaInterpreter
-using JuliaInterpreter: JuliaProgramCounter, @lookup, moduleof, pc_expr, _step_expr!, is_global_ref
+using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, whichtt,
+                        next_until!, finish_and_return!, nstatements, codelocation
 
-export whichtt, signature, methoddef!, methoddefs!
-
-"""
-    method = whichtt(tt)
-
-Like `which` except it operates on the complete tuple-type `tt`.
-"""
-function whichtt(tt)
-    m = ccall(:jl_gf_invoke_lookup, Any, (Any, UInt), tt, typemax(UInt))
-    m === nothing && return nothing
-    return m.func::Method
-end
+export signature, methoddef!, methoddefs!
 
 """
     iscallto(stmt, name)
@@ -60,14 +50,24 @@ end
 
 """
     nextpc = next_or_nothing(frame, pc)
+    nextpc = next_or_nothing!(frame)
 
 Advance the program counter without executing the corresponding line.
 If `frame` is finished, `nextpc` will be `nothing`.
 """
-next_or_nothing(frame, pc) = convert(Int, pc) < length(frame.code.code.code) ? pc+1 : nothing
+next_or_nothing(frame, pc) = pc < nstatements(frame.framecode) ? pc+1 : nothing
+function next_or_nothing!(frame)
+    pc = frame.pc
+    if pc < nstatements(frame.framecode)
+        frame.pc = pc = pc + 1
+        return pc
+    end
+    return nothing
+end
 
 """
     nextpc = skip_until(predicate, frame, pc)
+    nextpc = skip_until!(predicate, frame)
 
 Advance the program counter until `predicate(stmt)` return `true`.
 """
@@ -75,6 +75,16 @@ function skip_until(predicate, frame, pc)
     stmt = pc_expr(frame, pc)
     while !predicate(stmt)
         pc = next_or_nothing(frame, pc)
+        pc === nothing && return nothing
+        stmt = pc_expr(frame, pc)
+    end
+    return pc
+end
+function skip_until!(predicate, frame)
+    pc = frame.pc
+    stmt = pc_expr(frame, pc)
+    while !predicate(stmt)
+        pc = next_or_nothing!(frame)
         pc === nothing && return nothing
         stmt = pc_expr(frame, pc)
     end
@@ -107,7 +117,8 @@ function signature(sigsv::SimpleVector)
 end
 
 """
-    sigt, lastpc = signature(stack, frame, pc)
+    sigt, lastpc = signature(recurse, frame, pc)
+    sigt, lastpc = signature(frame, pc)
 
 Compute the signature-type `sigt` of a method whose definition in `frame` starts at `pc`.
 Generally, `pc` should point to the `Expr(:method, methname)` statement, in which case
@@ -119,14 +130,14 @@ In this case, `lastpc == pc`.
 
 If no 3-argument `:method` expression is found, `sigt` will be `nothing`.
 """
-function signature(stack, frame, stmt, pc::JuliaProgramCounter)
-    lastpc = pc
+function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc)
+    lastpc = frame.pc = pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
         if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
-            lastpc = pc = define_anonymous(stack, frame, stmt, pc)
+            lastpc = pc = define_anonymous(recurse, frame, stmt)
         else
             lastpc = pc
-            pc = _step_expr!(stack, frame, stmt, pc, true)
+            pc = step_expr!(recurse, frame, stmt, true)
             pc === nothing && return nothing, lastpc
         end
         stmt = pc_expr(frame, pc)
@@ -135,7 +146,8 @@ function signature(stack, frame, stmt, pc::JuliaProgramCounter)
     sigt = signature(sigsv)
     return sigt, lastpc
 end
-signature(stack, frame, pc::JuliaProgramCounter) = signature(stack, frame, pc_expr(frame, pc), pc)
+signature(@nospecialize(recurse), frame::Frame, pc) = signature(recurse, frame, pc_expr(frame, pc), pc)
+signature(frame::Frame, pc) = signature(finish_and_return!, frame, pc)
 
 function minid(node, stmts, id)
     if isa(node, SSAValue)
@@ -152,7 +164,7 @@ end
 
 function signature_top(frame, stmt, pc)
     @assert ismethod3(stmt)
-    return JuliaProgramCounter(minid(stmt.args[2], frame.code.code.code, convert(Int, pc)))
+    return minid(stmt.args[2], frame.framecode.src.code, pc)
 end
 
 ##
@@ -166,12 +178,12 @@ function isanonymous_typedef(code::CodeInfo)
     return startswith(String(name), "#")
 end
 
-function define_anonymous(stack, frame, stmt, pc)
+function define_anonymous(@nospecialize(recurse), frame, stmt)
     while !isexpr(stmt, :method)
-        pc = _step_expr!(stack, frame, stmt, pc, true)
+        pc = step_expr!(recurse, frame, stmt, true)
         stmt = pc_expr(frame, pc)
     end
-    return _step_expr!(stack, frame, stmt, pc, true)  # also define the method
+    return step_expr!(recurse, frame, stmt, true)  # also define the method
 end
 
 ##
@@ -261,16 +273,16 @@ function replacename!(args::Vector{Any}, pr)
     return args
 end
 
-function correct_name!(stack, frame, pc, name, parentname)
+function correct_name!(@nospecialize(recurse), frame, pc, name, parentname)
     # Get the correct name (the one that's actively running)
     nameinfo = find_corrected_name(frame, pc, name, parentname)
     if nameinfo === nothing
         pc = skip_until(stmt->isexpr(stmt, :method, 3), frame, pc)
-        lastidx = convert(Int, pc)
+        lastidx = pc
         pc = next_or_nothing(frame, pc)
     else
         pctop, isgen = nameinfo
-        sigtparent, lastpcparent = signature(stack, frame, pctop)
+        sigtparent, lastpcparent = signature(recurse, frame, pctop)
         methparent = whichtt(sigtparent)
         methparent === nothing && return name, pc  # caller isn't defined, no correction is needed
         if isgen
@@ -287,7 +299,7 @@ function correct_name!(stack, frame, pc, name, parentname)
         end
         # Swap in the correct name
         if name != cname
-            replacename!(frame.code.code.code, name=>cname)
+            replacename!(frame.framecode.src.code, name=>cname)
         end
         stmt = pc_expr(frame, lastpcparent)
         while !ismethod(stmt)
@@ -301,9 +313,10 @@ function correct_name!(stack, frame, pc, name, parentname)
 end
 
 """
-    ret = methoddef!(signatures, stack, frame, pc; define=true)
+    ret = methoddef!(recurse, signatures, frame; define=true)
+    ret = methoddef!(signatures, frame; define=true)
 
-Compute the signature of a method definition. `pc` should point to a
+Compute the signature of a method definition. `frame.pc` should point to a
 `:method` expression. Upon exit, the new signature will be added to `signatures`.
 
 There are several possible return values:
@@ -327,23 +340,26 @@ An important point is that `methoddef!` may, in some circumstances, change the n
 of methods in `frame`.  The issues are described in https://github.com/JuliaLang/julia/issues/30908.
 `methoddef!` will try to replace names with the ones that are currently active.
 """
-function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; define=true)
+function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecialize(stmt), pc::Int; define=true)
+    framecode = frame.framecode
     if ismethod3(stmt)
         pc3 = pc
-        sigt, pc = signature(stack, frame, stmt, pc)
+        sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
         if isa(meth, Method)
             push!(signatures, meth.sig)
         else
             # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
-            code = frame.code.code
-            loc = code.linetable[code.codelocs[convert(Int, pc)]]
+            code = framecode.src
+            codeloc = codelocation(code, pc)
+            loc = code.linetable[codeloc]
             ft = Base.unwrap_unionall(Base.unwrap_unionall(sigt).parameters[1])
             if !startswith(String(ft.name.name), "##")
                 @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
             end
         end
-        return ( define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc) ), pc3
+        frame.pc = pc
+        return ( define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame) ), pc3
     end
     ismethod1(stmt) || error("expected method opening, got ", stmt)
     name = stmt.args[1]
@@ -356,10 +372,10 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; def
         name = nextstmt.args[1]
     end
     if name != parentname
-        name, endpc = correct_name!(stack, frame, pc, name, parentname)
+        name, endpc = correct_name!(recurse, frame, pc, name, parentname)
     end
     while true  # methods containing inner methods may need multiple trips through this loop
-        sigt, pc = signature(stack, frame, stmt, pc)
+        sigt, pc = signature(recurse, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
             pc = next_or_nothing(frame, pc)  # this should not check define, we've probably already done this once
@@ -371,43 +387,49 @@ function methoddef!(signatures, stack, frame, stmt, pc::JuliaProgramCounter; def
         sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
-        pc = define ? _step_expr!(stack, frame, stmt, pc, true) : next_or_nothing(frame, pc)
+        frame.pc = pc
+        pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame)
         meth = whichtt(sigt)
         isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
         name == name3 && return pc, pc3     # if this was an inner method we should keep going
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
 end
-methoddef!(signatures, stack, frame, pc::JuliaProgramCounter; define=true) =
-    methoddef!(signatures, stack, frame, pc_expr(frame, pc), pc; define=define)
-function methoddef!(signatures, stack, frame; define=true)
-    pc = frame.pc[]
+methoddef!(@nospecialize(recurse), signatures, frame::Frame, pc::Int; define=true) =
+    methoddef!(recurse, signatures, frame, pc_expr(frame, pc), pc; define=define)
+function methoddef!(@nospecialize(recurse), signatures, frame::Frame; define=true)
+    pc = frame.pc
     stmt = pc_expr(frame, pc)
     if !ismethod(stmt)
-        pc = JuliaInterpreter.next_until!(ismethod, stack, frame, pc, true)
+        pc = next_until!(ismethod, recurse, frame, true)
     end
-    methoddef!(signatures, stack, frame, pc; define=define)
+    pc === nothing && error("pc at end of frame without finding a method")
+    methoddef!(recurse, signatures, frame, pc; define=define)
 end
+methoddef!(signatures, frame::Frame; define=true) =
+    methoddef!(finish_and_return!, signatures, frame; define=define)
 
-function methoddefs!(signatures, stack, frame; define=true)
-    ret = methoddef!(signatures, stack, frame; define=define)
+function methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; define=true)
+    ret = methoddef!(recurse, signatures, frame, pc; define=define)
     pc = ret === nothing ? ret : ret[1]
-    return _methoddefs!(signatures, stack, frame, pc; define=define)
+    return _methoddefs!(recurse, signatures, frame, pc; define=define)
 end
-function methoddefs!(signatures, stack, frame, pc::JuliaProgramCounter; define=true)
-    ret = methoddef!(signatures, stack, frame, pc; define=define)
+function methoddefs!(@nospecialize(recurse), signatures, frame::Frame; define=true)
+    ret = methoddef!(recurse, signatures, frame; define=define)
     pc = ret === nothing ? ret : ret[1]
-    return _methoddefs!(signatures, stack, frame, pc; define=define)
+    return _methoddefs!(recurse, signatures, frame, pc; define=define)
 end
+methoddefs!(signatures, frame::Frame; define=true) =
+    methoddefs!(finish_and_return!, signatures, frame; define=define)
 
-function _methoddefs!(signatures, stack, frame, pc; define=define)
+function _methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; define=define)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
-            pc = JuliaInterpreter.next_until!(ismethod, stack, frame, pc, true)
+            pc = next_until!(ismethod, recurse, frame, true)
         end
         pc === nothing && break
-        ret = methoddef!(signatures, stack, frame, pc; define=define)
+        ret = methoddef!(recurse, signatures, frame, pc; define=define)
         pc = ret === nothing ? ret : ret[1]
     end
     return pc
@@ -419,14 +441,14 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     kwdefine = NamedTuple{(:define,),Tuple{Bool}}
     for ct in (Vector{Any}, Set{Any})
         f = methoddef!
-        precompile(Tuple{typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame, Expr, JuliaProgramCounter})
-        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame, Expr, JuliaProgramCounter})
+        precompile(Tuple{typeof(f), ct, Any, Frame, Expr, Int})
+        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Any, Frame, Expr, Int})
         f = methoddefs!
-        precompile(Tuple{typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame})
-        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Vector{JuliaStackFrame}, JuliaStackFrame})
+        precompile(Tuple{typeof(f), ct, Any, Frame})
+        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Any, Frame})
     end
     precompile(Tuple{typeof(get_parentname), Symbol})
-    precompile(Tuple{typeof(correct_name!), Vector{JuliaStackFrame}, JuliaStackFrame, JuliaProgramCounter, Symbol, Symbol})
+    precompile(Tuple{typeof(correct_name!), Any, Frame, Int, Symbol, Symbol})
 end
 
 end # module
