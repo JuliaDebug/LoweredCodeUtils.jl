@@ -183,12 +183,12 @@ end
             end
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = JuliaInterpreter.prepare_thunk(Base, ex)
     empty!(signatures)
     stmt = JuliaInterpreter.pc_expr(frame)
     if !LoweredCodeUtils.ismethod(stmt)
         pc = JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod, frame, true)
     end
-    pc, pc3 = methoddef!(signatures, frame; define=true)  # this tests that the return isn't `nothing`
+    pc, pc3 = methoddef!(signatures, frame; define=false)  # this tests that the return isn't `nothing`
     @test length(signatures) == 2  # both the GeneratedFunctionStub and the main method
 end
