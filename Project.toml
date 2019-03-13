@@ -1,5 +1,5 @@
 name = "LoweredCodeUtils"
-uuid = "4a9976d8-2c6a-11e9-1378-e1e33d058965"
+uuid = "6f1432cf-f94c-5a45-995e-cdbf5db27b0b"
 authors = ["Tim Holy <tim.holy@gmail.com>"]
 version = "0.1.0"
 
