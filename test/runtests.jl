@@ -11,6 +11,18 @@ struct Caller end
 struct Gen{T} end
 end
 
+bodymethtest0(x) = 0
+function bodymethtest0(x)
+    y = 2x
+    y + x
+end
+bodymethtest1(x, y=1; z="hello") = 1
+bodymethtest2(x, y=Dict(1=>2); z="hello") = 2
+bodymethtest3(x::T, y=Dict(1=>2); z="hello") where T<:AbstractFloat = 3
+# No kw but has optional args
+bodymethtest4(x, y=1) = 4
+bodymethtest5(x, y=Dict(1=>2)) = 5
+
 @testset "LoweredCodeUtils.jl" begin
     signatures = Set{Any}()
     newcode = CodeInfo[]
@@ -198,4 +210,13 @@ end
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
     @test !isempty(signatures)
+
+    for m in methods(bodymethtest0)
+        @test bodymethod(m) === m
+    end
+    @test startswith(String(bodymethod(first(methods(bodymethtest1))).name), "#")
+    @test startswith(String(bodymethod(first(methods(bodymethtest2))).name), "#")
+    @test startswith(String(bodymethod(first(methods(bodymethtest3))).name), "#")
+    @test bodymethod(first(methods(bodymethtest4))).nargs == 3  # one extra for #self#
+    @test bodymethod(first(methods(bodymethtest5))).nargs == 3
 end
