@@ -348,6 +348,12 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         meth = whichtt(sigt)
         if isa(meth, Method)
             push!(signatures, meth.sig)
+        elseif stmt.args[1] == false
+            # If it's anonymous and not defined, define it
+            pc = step_expr!(recurse, frame, stmt, true)
+            meth = whichtt(sigt)
+            isa(meth, Method) && push!(signatures, meth.sig)
+            return pc, pc3
         else
             # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
             code = framecode.src
