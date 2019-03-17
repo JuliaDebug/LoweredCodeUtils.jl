@@ -191,4 +191,11 @@ end
     end
     pc, pc3 = methoddef!(signatures, frame; define=false)  # this tests that the return isn't `nothing`
     @test length(signatures) == 2  # both the GeneratedFunctionStub and the main method
+
+    # With anonymous functions in signatures
+    ex = :(const BitIntegerType = Union{map(T->Type{T}, Base.BitInteger_types)...})
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=false)
+    @test !isempty(signatures)
 end
