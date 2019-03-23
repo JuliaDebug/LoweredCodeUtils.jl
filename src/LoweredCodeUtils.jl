@@ -6,7 +6,7 @@ using JuliaInterpreter
 using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, whichtt,
                         next_until!, finish_and_return!, nstatements, codelocation
 
-export signature, methoddef!, methoddefs!
+export signature, methoddef!, methoddefs!, bodymethod
 
 """
     iscallto(stmt, name)
@@ -439,6 +439,68 @@ function _methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; defi
         pc = ret === nothing ? ret : ret[1]
     end
     return pc
+end
+
+"""
+    mbody = bodymethod(m::Method)
+
+Return the "body method" for a method `m`. `mbody` contains the code of the function body
+when `m` was defined.
+"""
+function bodymethod(mkw::Method)
+    function is_self_call(stmt, slotnames, argno=1)
+        if isa(stmt, Expr)
+            if stmt.head == :call
+                a = stmt.args[argno]
+                if isa(a, Core.SlotNumber)
+                    if slotnames[a.id] == Symbol("#self#")
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end
+    m = mkw
+    local src
+    while true
+        framecode = JuliaInterpreter.get_framecode(m)
+        fakeargs = Any[nothing for i = 1:length(framecode.scope.nargs)]
+        frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
+        src = framecode.src
+        (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
+        # Build the optional arg, so we can get its type
+        pc = frame.pc
+        while pc < length(src.code) - 1
+            pc = step_expr!(frame)
+        end
+        val = pc > 1 ? frame.framedata.ssavalues[pc-1] : src.code[1].args[end]
+        sig = Tuple{Base.unwrap_unionall(m.sig).parameters..., typeof(val)}
+        m = whichtt(sig)
+    end
+    length(src.code) > 1 || return m
+    stmt = src.code[end-1]
+    if isexpr(stmt, :call) && (f = stmt.args[1]; isa(f, QuoteNode))
+        # Check that it has a #self# call
+        hasself = any(i->is_self_call(stmt, src.slotnames, i), 1:length(stmt.args))
+        hasself || return m
+        f = f.value
+        mths = methods(f)
+        if length(mths) == 1
+            return first(mths)
+        end
+    end
+    return m
+end
+
+function sparam_ub(meth::Method)
+    typs = []
+    sig = meth.sig
+    while sig isa UnionAll
+        push!(typs, Symbol(sig.var.ub))
+        sig = sig.body
+    end
+    return Core.svec(typs...)
 end
 
 # precompilation
