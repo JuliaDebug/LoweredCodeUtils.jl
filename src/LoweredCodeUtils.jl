@@ -349,7 +349,15 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     if ismethod3(stmt)
         pc3 = pc
         sigt, pc = signature(recurse, frame, stmt, pc)
+        if sigt === nothing && define
+            step_expr!(recurse, frame, stmt, true)
+        end
+        sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
+        if meth === nothing && define
+            step_expr!(recurse, frame, stmt, true)
+            meth = whichtt(sigt)
+        end
         if isa(meth, Method)
             push!(signatures, meth.sig)
         elseif stmt.args[1] == false
