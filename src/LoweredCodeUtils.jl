@@ -131,10 +131,14 @@ In this case, `lastpc == pc`.
 If no 3-argument `:method` expression is found, `sigt` will be `nothing`.
 """
 function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc)
+    mod = moduleof(frame)
     lastpc = frame.pc = pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
         if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
             lastpc = pc = define_anonymous(recurse, frame, stmt)
+        elseif isexpr(stmt, :call) && JuliaInterpreter.is_quotenode(stmt.args[1], Core.Typeof) &&
+               (sym = stmt.args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
+            return nothing, pc
         else
             lastpc = pc
             pc = step_expr!(recurse, frame, stmt, true)
@@ -278,37 +282,37 @@ function correct_name!(@nospecialize(recurse), frame, pc, name, parentname)
     nameinfo = find_corrected_name(frame, pc, name, parentname)
     if nameinfo === nothing
         pc = skip_until(stmt->isexpr(stmt, :method, 3), frame, pc)
-        lastidx = pc
         pc = next_or_nothing(frame, pc)
-    else
-        pctop, isgen = nameinfo
-        sigtparent, lastpcparent = signature(recurse, frame, pctop)
-        methparent = whichtt(sigtparent)
-        methparent === nothing && return name, pc  # caller isn't defined, no correction is needed
-        if isgen
-            cname = nameof(methparent.generator.gen)
-        else
-            bodyparent = Base.uncompressed_ast(methparent)
-            bodystmt = bodyparent.code[end-1]
-            @assert isexpr(bodystmt, :call)
-            ref = getcallee(bodystmt)
-            isa(ref, GlobalRef) || @show ref typeof(ref)
-            @assert isa(ref, GlobalRef)
-            @assert ref.mod == moduleof(frame)
-            cname = ref.name
-        end
-        # Swap in the correct name
-        if name != cname
-            replacename!(frame.framecode.src.code, name=>cname)
-        end
-        stmt = pc_expr(frame, lastpcparent)
-        while !ismethod(stmt)
-            lastpcparent = next_or_nothing(frame, lastpcparent)
-            lastpcparent === nothing && return name, lastpcparent
-            stmt = pc_expr(frame, lastpcparent)
-        end
-        name = stmt.args[1]
+        return name, pc
     end
+    pctop, isgen = nameinfo
+    sigtparent, lastpcparent = signature(recurse, frame, pctop)
+    sigtparent === nothing && return name, pc
+    methparent = whichtt(sigtparent)
+    methparent === nothing && return name, pc  # caller isn't defined, no correction is needed
+    if isgen
+        cname = nameof(methparent.generator.gen)
+    else
+        bodyparent = Base.uncompressed_ast(methparent)
+        bodystmt = bodyparent.code[end-1]
+        @assert isexpr(bodystmt, :call)
+        ref = getcallee(bodystmt)
+        isa(ref, GlobalRef) || @show ref typeof(ref)
+        @assert isa(ref, GlobalRef)
+        @assert ref.mod == moduleof(frame)
+        cname = ref.name
+    end
+    # Swap in the correct name
+    if name != cname
+        replacename!(frame.framecode.src.code, name=>cname)
+    end
+    stmt = pc_expr(frame, lastpcparent)
+    while !ismethod(stmt)
+        lastpcparent = next_or_nothing(frame, lastpcparent)
+        lastpcparent === nothing && return name, lastpcparent
+        stmt = pc_expr(frame, lastpcparent)
+    end
+    name = stmt.args[1]
     return name, pc
 end
 
@@ -345,7 +349,15 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     if ismethod3(stmt)
         pc3 = pc
         sigt, pc = signature(recurse, frame, stmt, pc)
+        if sigt === nothing && define
+            step_expr!(recurse, frame, stmt, true)
+        end
+        sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
+        if meth === nothing && define
+            step_expr!(recurse, frame, stmt, true)
+            meth = whichtt(sigt)
+        end
         if isa(meth, Method)
             push!(signatures, meth.sig)
         elseif stmt.args[1] == false
