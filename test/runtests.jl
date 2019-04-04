@@ -180,6 +180,30 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     methoddefs!(signatures, frame; define=true)
     @test Lowering.fdefine(0) == 1
 
+    # define with correct_name!
+    ex = quote
+        @generated function generated1(A::AbstractArray{T,N}, val) where {T,N}
+            ex = Expr(:tuple)
+            for i = 1:N
+                push!(ex.args, :val)
+            end
+            return ex
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=true)
+    @test length(signatures) == 2
+    @test Lowering.generated1(rand(2,2), 3.2) == (3.2, 3.2)
+    ex = quote
+        another_kwdef(x, y=1; z="hello") = 333
+    end
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=true)
+    @test length(signatures) == 5
+    @test Lowering.another_kwdef(0) == 333
+
     # Test for correct exit (example from base/namedtuples.jl)
     ex = quote
         function merge(a::NamedTuple{an}, b::NamedTuple{bn}) where {an, bn}
