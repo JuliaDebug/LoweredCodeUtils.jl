@@ -3,7 +3,7 @@ module LoweredCodeUtils
 using Core: SimpleVector, CodeInfo
 using Base.Meta: isexpr
 using JuliaInterpreter
-using JuliaInterpreter: SSAValue, SlotNumber
+using JuliaInterpreter: SSAValue, SlotNumber, Frame
 using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, whichtt,
                         next_until!, finish_and_return!, nstatements, codelocation
 
@@ -37,6 +37,7 @@ function getcallee(stmt)
     error(stmt, " is not a call expression")
 end
 
+ismethod(frame::Frame) = ismethod(pc_expr(frame))
 ismethod(stmt)  = isexpr(stmt, :method)
 ismethod1(stmt) = isexpr(stmt, :method, 1)
 ismethod3(stmt) = isexpr(stmt, :method, 3)
