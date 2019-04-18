@@ -1,8 +1,9 @@
 module LoweredCodeUtils
 
-using Core: SimpleVector, CodeInfo, SSAValue
+using Core: SimpleVector, CodeInfo
 using Base.Meta: isexpr
 using JuliaInterpreter
+using JuliaInterpreter: SSAValue, SlotNumber, Frame
 using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, whichtt,
                         next_until!, finish_and_return!, nstatements, codelocation
 
@@ -36,6 +37,7 @@ function getcallee(stmt)
     error(stmt, " is not a call expression")
 end
 
+ismethod(frame::Frame) = ismethod(pc_expr(frame))
 ismethod(stmt)  = isexpr(stmt, :method)
 ismethod1(stmt) = isexpr(stmt, :method, 1)
 ismethod3(stmt) = isexpr(stmt, :method, 3)
@@ -464,7 +466,7 @@ function bodymethod(mkw::Method)
         if isa(stmt, Expr)
             if stmt.head == :call
                 a = stmt.args[argno]
-                if isa(a, Core.SlotNumber)
+                if isa(a, SlotNumber)
                     if slotnames[a.id] == Symbol("#self#")
                         return true
                     end
