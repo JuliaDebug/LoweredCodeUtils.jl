@@ -387,11 +387,34 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         error("not valid for anonymous methods")
     end
     parentname = get_parentname(name)  # e.g., name = #foo#7 and parentname = foo
-    nextstmt = pc_expr(frame, pc+1)
-    if ismethod1(nextstmt)
-        name = nextstmt.args[1]
+    pcinc = 1
+    nextstmt = pc_expr(frame, pc+pcinc)
+    while ismethod1(nextstmt) || isexpr(nextstmt, :global)
+        if ismethod1(nextstmt)
+            name = nextstmt.args[1]
+        end
+        pcinc += 1
+        nextstmt = pc_expr(frame, pc+pcinc)
     end
-    if name != parentname
+    if !define && String(name)[1] == '#'
+        # We will have to correct the name.
+        # We can only correct one at a time, so work backwards from a non-gensymmed name
+        # (https://github.com/timholy/Revise.jl/issues/290)
+        pc0 = pc
+        idx1 = findall(ismethod1, frame.framecode.src.code)
+        idx1 = idx1[idx1 .>= pc]
+        i = length(idx1)
+        while i > 1 && !startswith(String(pc_expr(frame, idx1[i]).args[1]), '#')
+            i -= 1
+        end
+        while i > 1
+            frame.pc = idx1[i]
+            methoddef!(recurse, [], frame, frame.pc; define=define)
+            i -= 1
+        end
+        frame.pc = pc0
+    end
+    if name != parentname && !define
         name, endpc = correct_name!(recurse, frame, pc, name, parentname)
     end
     while true  # methods containing inner methods may need multiple trips through this loop

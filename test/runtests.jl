@@ -56,6 +56,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
                        end
                    end
                end,
+               :(@generated genkw(; b=2) = nothing),  # https://github.com/timholy/Revise.jl/issues/290
                # Generated constructors
                quote
                    function Gen{T}(x) where T
@@ -203,6 +204,12 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     methoddefs!(signatures, frame; define=true)
     @test length(signatures) == 5
     @test Lowering.another_kwdef(0) == 333
+    ex = :(@generated genkw2(; b=2) = nothing)  # https://github.com/timholy/Revise.jl/issues/290
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=true)
+    @test length(signatures) == 4
+    @test Lowering.genkw2() === nothing
 
     # Test for correct exit (example from base/namedtuples.jl)
     ex = quote
