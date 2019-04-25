@@ -403,10 +403,9 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         pc0 = pc
         idx1 = findall(ismethod1, frame.framecode.src.code)
         idx1 = idx1[idx1 .>= pc]
+        hashhash = map(idx->startswith(String(pc_expr(frame, idx).args[1]), '#'), idx1)
+        idx1 = idx1[hashhash]
         i = length(idx1)
-        while i > 1 && !startswith(String(pc_expr(frame, idx1[i]).args[1]), '#')
-            i -= 1
-        end
         while i > 1
             frame.pc = idx1[i]
             methoddef!(recurse, [], frame, frame.pc; define=define)
@@ -422,7 +421,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
             pc = next_or_nothing(frame, pc)  # this should not check define, we've probably already done this once
-            pc === nothing && return pc   # this was just `function foo end`, signal "no def"
+            pc === nothing && return nothing   # this was just `function foo end`, signal "no def"
             stmt = pc_expr(frame, pc)
         end
         pc3 = pc
