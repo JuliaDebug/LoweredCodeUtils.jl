@@ -37,7 +37,8 @@ function getcallee(stmt)
     error(stmt, " is not a call expression")
 end
 
-ismethod(frame::Frame) = ismethod(pc_expr(frame))
+ismethod(frame::Frame)  = ismethod(pc_expr(frame))
+ismethod3(frame::Frame) = ismethod3(pc_expr(frame))
 ismethod(stmt)  = isexpr(stmt, :method)
 ismethod1(stmt) = isexpr(stmt, :method, 1)
 ismethod3(stmt) = isexpr(stmt, :method, 3)
@@ -356,7 +357,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         end
         sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
-        if meth === nothing && define
+        if (meth === nothing || !(meth.sig <: sigt && sigt <: meth.sig)) && define
             step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
         end

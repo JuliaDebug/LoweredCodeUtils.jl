@@ -250,4 +250,14 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     @test startswith(String(bodymethod(first(methods(bodymethtest3))).name), "#")
     @test bodymethod(first(methods(bodymethtest4))).nargs == 3  # one extra for #self#
     @test bodymethod(first(methods(bodymethtest5))).nargs == 3
+
+    ex = :(typedsig(x) = 1)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    methoddefs!(signatures, frame; define=true)
+    ex = :(typedsig(x::Int) = 2)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod3, frame, true)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=true)
+    @test first(signatures).parameters[end] == Int
 end
