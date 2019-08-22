@@ -1,3 +1,4 @@
+using InteractiveUtils
 using LoweredCodeUtils, JuliaInterpreter
 using JuliaInterpreter: finish_and_return!
 using Core: CodeInfo
@@ -250,6 +251,10 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     @test startswith(String(bodymethod(first(methods(bodymethtest3))).name), "#")
     @test bodymethod(first(methods(bodymethtest4))).nargs == 3  # one extra for #self#
     @test bodymethod(first(methods(bodymethtest5))).nargs == 3
+    m = @which sum([1]; dims=1)
+    # Issue in https://github.com/timholy/CodeTracking.jl/pull/48
+    mbody = bodymethod(m)
+    @test mbody != m && mbody.file != :none
 
     ex = :(typedsig(x) = 1)
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
