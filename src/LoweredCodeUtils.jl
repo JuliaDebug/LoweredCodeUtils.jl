@@ -478,6 +478,21 @@ function _methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; defi
     return pc
 end
 
+function is_self_call(stmt, slotnames, argno=1)
+    if isa(stmt, Expr)
+        if stmt.head == :call
+            a = stmt.args[argno]
+            if isa(a, SlotNumber) || isa(a, Core.SlotNumber)
+                sn = slotnames[a.id]
+                if sn == Symbol("#self#") || sn == Symbol("") # allow empty to fix https://github.com/timholy/CodeTracking.jl/pull/48
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
 """
     mbody = bodymethod(m::Method)
 
@@ -485,19 +500,6 @@ Return the "body method" for a method `m`. `mbody` contains the code of the func
 when `m` was defined.
 """
 function bodymethod(mkw::Method)
-    function is_self_call(stmt, slotnames, argno=1)
-        if isa(stmt, Expr)
-            if stmt.head == :call
-                a = stmt.args[argno]
-                if isa(a, SlotNumber)
-                    if slotnames[a.id] == Symbol("#self#")
-                        return true
-                    end
-                end
-            end
-        end
-        return false
-    end
     m = mkw
     local src
     while true
@@ -519,7 +521,7 @@ function bodymethod(mkw::Method)
     stmt = src.code[end-1]
     if isexpr(stmt, :call) && (f = stmt.args[1]; isa(f, QuoteNode))
         # Check that it has a #self# call
-        hasself = any(i->is_self_call(stmt, src.slotnames, i), 1:length(stmt.args))
+        hasself = any(i->is_self_call(stmt, src.slotnames, i), 2:length(stmt.args))
         hasself || return m
         f = f.value
         mths = methods(f)
