@@ -7,7 +7,7 @@ using JuliaInterpreter: SSAValue, SlotNumber, Frame
 using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, whichtt,
                         next_until!, finish_and_return!, nstatements, codelocation
 
-export signature, methoddef!, methoddefs!, bodymethod
+export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod
 
 """
     iscallto(stmt, name)
@@ -39,17 +39,10 @@ end
 
 ismethod(frame::Frame)  = ismethod(pc_expr(frame))
 ismethod3(frame::Frame) = ismethod3(pc_expr(frame))
+
 ismethod(stmt)  = isexpr(stmt, :method)
 ismethod1(stmt) = isexpr(stmt, :method, 1)
 ismethod3(stmt) = isexpr(stmt, :method, 3)
-
-function methodname(name)
-    isa(name, Symbol) && return name
-    if isa(name, CodeInfo) && length(name.code) == 1 && isexpr(name.code[1], :return) && ismethod1(name.code[1].args[1])
-        return name.code[1].args[1].args[1]
-    end
-    error("unhandled name type ", typeof(name))
-end
 
 """
     nextpc = next_or_nothing(frame, pc)
@@ -177,9 +170,9 @@ end
 ##
 ## Detecting anonymous functions. These start with a :thunk expr and have a characteristic CodeInfo
 ##
-function isanonymous_typedef(code::CodeInfo)
-    length(code.code) >= 4 || return false
-    stmt = code.code[end-1]
+function isanonymous_typedef(src::CodeInfo)
+    length(src.code) >= 4 || return false
+    stmt = src.code[end-1]
     isexpr(stmt, :struct_type) || return false
     name = stmt.args[1]::Symbol
     return startswith(String(name), "#")
@@ -193,30 +186,183 @@ function define_anonymous(@nospecialize(recurse), frame, stmt)
     return step_expr!(recurse, frame, stmt, true)  # also define the method
 end
 
-##
-## Deal with gensymmed names, https://github.com/JuliaLang/julia/issues/30908
-## This handles the situation in which a method is created using a different gensym
-## than when this method was last lowered & evaled.
-##
+"""
+    MethodInfo(start, stop, refs)
 
-function get_parentname(name)
-    isa(name, Expr) && return name
-    name = methodname(name)
-    isa(name, Symbol) || error("unhandled name type ", typeof(name))
-    namestring = String(name)
-    if namestring[1] == '#'
-        pidx = 1
-        idx = nextind(namestring, pidx)
-        while namestring[idx] != '#'
-            pidx = idx
-            idx = nextind(namestring, idx)
-        end
-        parentname = Symbol(namestring[2:pidx])
-    else
-        parentname = name
-    end
-    return parentname
+Given a frame and its CodeInfo, `start` is the line of the first `Expr(:method, name)`,
+whereas `stop` is the line of the last `Expr(:method, name, sig, src)` expression for `name`.
+`refs` is a vector of line numbers of other references.
+Some of these will be the location of the "declaration" of a method,
+the `:thunk` expression containing a CodeInfo that just returns a 1-argument `:method` expression.
+Others may be `:global` declarations.
+
+In some cases there may be more than one method with the same name in the `start:stop` range.
+"""
+mutable struct MethodInfo
+    start::Int
+    stop::Int
+    refs::Vector{Int}
 end
+MethodInfo(start) = MethodInfo(start, -1, Int[])
+
+"""
+    methodinfos, selfcalls = identify_framemethod_calls(frame)
+
+Analyze the code in `frame` to locate method definitions and "self-calls," i.e., calls
+to methods defined in `frame` that occur within `frame`.
+
+`methodinfos` is a Dict of `name=>info` pairs, where `info` is a [`MethodInfo`](@ref).
+
+`selfcalls` is a list of `(linetop, linebody, callee, caller)` tuples that holds the location of
+calls the methods defined in `frame`. `linetop` is the line in `frame` (top meaning "top level"),
+which will correspond to a 3-argument `:method` expression containing a `CodeInfo` body.
+`linebody` is the line within the `CodeInfo` body from which the call is made.
+`callee` is the Symbol of the called method.
+"""
+function identify_framemethod_calls(frame)
+    refs = Pair{Symbol,Int}[]
+    methodinfos = Dict{Symbol,MethodInfo}()
+    selfcalls = NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Symbol,Bool}}}[]
+    for (i, stmt) in enumerate(frame.framecode.src.code)
+        if isexpr(stmt, :global, 1)
+            key = stmt.args[1]
+            # We don't know for sure if this is a reference to a method, but let's
+            # tentatively cue it
+            push!(refs, key=>i)
+        elseif isexpr(stmt, :thunk, 1) && stmt.args[1] isa CodeInfo
+            tsrc = stmt.args[1]::CodeInfo
+            if length(tsrc.code) == 1
+                tstmt = tsrc.code[1]
+                if isexpr(tstmt, :return, 1)
+                    tex = tstmt.args[1]
+                    if isexpr(tex, :method)
+                        push!(refs, tex.args[1]=>i)
+                    end
+                end
+            end
+        elseif ismethod1(stmt)
+            key = stmt.args[1]
+            mi = get(methodinfos, key, nothing)
+            if mi === nothing
+                methodinfos[key] = MethodInfo(i)
+            else
+                mi.stop == -1 && (mi.start = i) # advance the statement # unless we've seen the method3
+            end
+        elseif ismethod3(stmt)
+            key = stmt.args[1]
+            if key isa Symbol
+                mi = methodinfos[key]
+                mi.stop = i
+            elseif key isa Expr   # this is a module-scoped call. We don't have to worry about these because they are named
+                continue
+            end
+            msrc = stmt.args[3]
+            if msrc isa CodeInfo
+                for (j, mstmt) in enumerate(msrc.code)
+                    if isexpr(mstmt, :call)
+                        mkey = mstmt.args[1]
+                        isa(key, Expr) && @show mkey
+                        haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                    elseif isexpr(mstmt, :meta) && mstmt.args[1] == :generated
+                        newex = mstmt.args[2]
+                        if isexpr(newex, :new) && length(newex.args) >= 2 && is_global_ref(newex.args[1], Core, :GeneratedFunctionStub)
+                            mkey = newex.args[2]
+                            haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for r in refs
+        mi = get(methodinfos, r.first, nothing)
+        mi === nothing || push!(mi.refs, r.second)
+    end
+    return methodinfos, selfcalls
+end
+
+function callchain(selfcalls)
+    calledby = Dict{Symbol,Union{Symbol,Bool}}()
+    for sc in selfcalls
+        startswith(String(sc.callee), '#') || continue
+        caller = get(calledby, sc.callee, nothing)
+        if caller === nothing
+            calledby[sc.callee] = sc.caller
+        elseif caller == sc.caller
+        else
+            error("unexpected multiple callers, ", caller, " and ", sc.caller)
+        end
+    end
+    return calledby
+end
+
+function set_to_running_name!(@nospecialize(recurse), replacements, frame, methodinfos, calledby, callee, caller)
+    if isa(caller, Symbol) && startswith(String(caller), '#')
+        rep = get(replacements, caller, nothing)
+        if rep === nothing
+            parentcaller = get(calledby, caller, nothing)
+            if parentcaller !== nothing
+                set_to_running_name!(recurse, replacements, frame, methodinfos, calledby, caller, parentcaller)
+            end
+        else
+            caller = rep
+        end
+    end
+    if isa(caller, Symbol)
+        mi = methodinfos[caller]
+        cname, _pc, _ = get_running_name(recurse, frame, mi.start, callee, get(replacements, caller, caller))
+    else
+        # For generated constructors (which have no name), we just assume they immediately follow their callee
+        mi = methodinfos[callee]
+        cname, _pc, _ = get_running_name(recurse, frame, mi.stop+1, callee, get(replacements, caller, caller))
+    end
+    replacements[callee] = cname
+    mi = methodinfos[cname] = methodinfos[callee]
+    src = frame.framecode.src
+    replacename!(src.code[mi.start:mi.stop], callee=>cname)        # the method itself
+    for r in mi.refs                                               # the references
+        replacename!((src.code[r])::Expr, callee=>cname)
+    end
+    return replacements
+end
+
+"""
+    methranges = rename_framemethods!(frame)
+    methranges = rename_framemethods!(recurse, frame)
+
+Rename the gensymmed methods in `frame` to match those that are currently active.
+The issues are described in https://github.com/JuliaLang/julia/issues/30908.
+`frame` will be modified in-place as needed.
+
+Returns a vector of `name=>start:stop` pairs specifying the range of lines in `frame`
+at which method definitions occur. In some cases there may be more than one method with
+the same name in the `start:stop` range.
+"""
+function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos, selfcalls, calledby)
+    src = frame.framecode.src
+    replacements = Dict{Symbol,Symbol}()
+    for (callee, caller) in calledby
+        (!startswith(String(callee), '#') || haskey(replacements, callee)) && continue
+        set_to_running_name!(recurse, replacements, frame, methodinfos, calledby, callee, caller)
+    end
+    for (linetop, linebody, callee, caller) in selfcalls
+        cname = get(replacements, callee, nothing)
+        if cname !== nothing && cname !== callee
+            replacename!((src.code[linetop].args[3])::CodeInfo, callee=>cname)
+        end
+    end
+    return methodinfos
+end
+
+function rename_framemethods!(@nospecialize(recurse), frame::Frame)
+    pc0 = frame.pc
+    methodinfos, selfcalls = identify_framemethod_calls(frame)
+    calledby = callchain(selfcalls)
+    rename_framemethods!(recurse, frame, methodinfos, selfcalls, calledby)
+    frame.pc = pc0
+    return methodinfos
+end
+rename_framemethods!(frame::Frame) = rename_framemethods!(finish_and_return!, frame)
 
 """
     pctop, isgen = find_corrected_name(frame, pc, name, parentname)
@@ -237,15 +383,18 @@ function find_corrected_name(frame, pc, name, parentname)
             stmt = pc_expr(frame, pc)
         end
         body = stmt.args[3]
-        if stmt.args[1] != name && stmt.args[1] != parentname
+        if stmt.args[1] != name
             # This might be the GeneratedFunctionStub for a @generated method
-            bodystmt = body.code[1]
-            if isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated
-                return signature_top(frame, stmt, pc), true
+            for (i, bodystmt) in enumerate(body.code)
+                if isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated
+                    return signature_top(frame, stmt, pc), true
+                end
+                i >= 5 && break  # we should find this early
             end
-        elseif length(body.code) > 1
-            bodystmt = body.code[end-1]  # the line before the final return
-            iscallto(bodystmt, name) && return signature_top(frame, stmt, pc), false
+            if length(body.code) > 1
+                bodystmt = body.code[end-1]  # the line before the final return
+                iscallto(bodystmt, name) && return signature_top(frame, stmt, pc), false
+            end
         end
         pc = next_or_nothing(frame, pc)
         pc === nothing && return nothing
@@ -263,6 +412,8 @@ function replacename!(ex::Expr, pr)
     return ex
 end
 
+replacename!(src::CodeInfo, pr) = replacename!(src.code, pr)
+
 function replacename!(args::Vector{Any}, pr)
     oldname, newname = pr
     for i = 1:length(args)
@@ -273,6 +424,8 @@ function replacename!(args::Vector{Any}, pr)
             replacename!(a.code, pr)
         elseif isa(a, QuoteNode) && a.value == oldname
             args[i] = QuoteNode(newname)
+        elseif isa(a, Vector{Any})
+            replacename!(a, pr)
         elseif a == oldname
             args[i] = newname
         end
@@ -280,19 +433,19 @@ function replacename!(args::Vector{Any}, pr)
     return args
 end
 
-function correct_name!(@nospecialize(recurse), frame, pc, name, parentname)
+function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
     # Get the correct name (the one that's actively running)
     nameinfo = find_corrected_name(frame, pc, name, parentname)
     if nameinfo === nothing
         pc = skip_until(stmt->isexpr(stmt, :method, 3), frame, pc)
         pc = next_or_nothing(frame, pc)
-        return name, pc
+        return name, pc, nothing
     end
     pctop, isgen = nameinfo
     sigtparent, lastpcparent = signature(recurse, frame, pctop)
-    sigtparent === nothing && return name, pc
+    sigtparent === nothing && return name, pc, lastpcparent
     methparent = whichtt(sigtparent)
-    methparent === nothing && return name, pc  # caller isn't defined, no correction is needed
+    methparent === nothing && return name, pc, lastpcparent  # caller isn't defined, no correction is needed
     if isgen
         cname = nameof(methparent.generator.gen)
     else
@@ -305,18 +458,7 @@ function correct_name!(@nospecialize(recurse), frame, pc, name, parentname)
         @assert ref.mod == moduleof(frame)
         cname = ref.name
     end
-    # Swap in the correct name
-    if name != cname
-        replacename!(frame.framecode.src.code, name=>cname)
-    end
-    stmt = pc_expr(frame, lastpcparent)
-    while !ismethod(stmt)
-        lastpcparent = next_or_nothing(frame, lastpcparent)
-        lastpcparent === nothing && return name, lastpcparent
-        stmt = pc_expr(frame, lastpcparent)
-    end
-    name = stmt.args[1]
-    return name, pc
+    return cname, pc, lastpcparent
 end
 
 """
@@ -342,13 +484,9 @@ occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be
 
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
-
-An important point is that `methoddef!` may, in some circumstances, change the names
-of methods in `frame`.  The issues are described in https://github.com/JuliaLang/julia/issues/30908.
-`methoddef!` will try to replace names with the ones that are currently active.
 """
 function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecialize(stmt), pc::Int; define=true)
-    framecode = frame.framecode
+    framecode, pcin = frame.framecode, pc
     if ismethod3(stmt)
         pc3 = pc
         sigt, pc = signature(recurse, frame, stmt, pc)
@@ -386,36 +524,6 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     name = stmt.args[1]
     if isa(name, Bool)
         error("not valid for anonymous methods")
-    end
-    parentname = get_parentname(name)  # e.g., name = #foo#7 and parentname = foo
-    pcinc = 1
-    nextstmt = pc_expr(frame, pc+pcinc)
-    while ismethod1(nextstmt) || isexpr(nextstmt, :global)
-        if ismethod1(nextstmt)
-            name = nextstmt.args[1]
-        end
-        pcinc += 1
-        nextstmt = pc_expr(frame, pc+pcinc)
-    end
-    if !define && String(name)[1] == '#'
-        # We will have to correct the name.
-        # We can only correct one at a time, so work backwards from a non-gensymmed name
-        # (https://github.com/timholy/Revise.jl/issues/290)
-        pc0 = pc
-        idx1 = findall(ismethod1, frame.framecode.src.code)
-        idx1 = idx1[idx1 .>= pc]
-        hashhash = map(idx->startswith(String(pc_expr(frame, idx).args[1]), '#'), idx1)
-        idx1 = idx1[hashhash]
-        i = length(idx1)
-        while i > 1
-            frame.pc = idx1[i]
-            methoddef!(recurse, [], frame, frame.pc; define=define)
-            i -= 1
-        end
-        frame.pc = pc0
-    end
-    if name != parentname && !define
-        name, endpc = correct_name!(recurse, frame, pc, name, parentname)
     end
     while true  # methods containing inner methods may need multiple trips through this loop
         sigt, pc = signature(recurse, frame, stmt, pc)
@@ -548,14 +656,12 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     kwdefine = NamedTuple{(:define,),Tuple{Bool}}
     for ct in (Vector{Any}, Set{Any})
         f = methoddef!
-        precompile(Tuple{typeof(f), ct, Any, Frame, Expr, Int})
-        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Any, Frame, Expr, Int})
+        @assert precompile(Tuple{typeof(f), Any, ct, Frame, Expr, Int})
+        # @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Any, ct, Frame, Expr, Int})
         f = methoddefs!
-        precompile(Tuple{typeof(f), ct, Any, Frame})
-        precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), ct, Any, Frame})
+        @assert precompile(Tuple{typeof(f), Any, ct, Frame})
+        # @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Any, ct, Frame})
     end
-    precompile(Tuple{typeof(get_parentname), Symbol})
-    precompile(Tuple{typeof(correct_name!), Any, Frame, Int, Symbol, Symbol})
 end
 
 end # module
