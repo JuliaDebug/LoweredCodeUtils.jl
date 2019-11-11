@@ -81,6 +81,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
                )
         Core.eval(Lowering, ex)
         frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+        rename_framemethods!(frame)
         pc = methoddefs!(signatures, frame; define=false)
         push!(newcode, frame.framecode.src)
     end
@@ -138,20 +139,10 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     end
     Core.eval(Lowering, ex)
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    rename_framemethods!(frame)
     methoddefs!(signatures, frame; define=false)
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
-
-    # Check positioning in correct_name!
-    ex = :(g(x::Int8; y=0) = y)
-    Core.eval(Lowering, ex)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
-    pc = frame.pc[]
-    stmt = JuliaInterpreter.pc_expr(frame, pc)
-    name = LoweredCodeUtils.methodname(stmt.args[1])
-    parentname = LoweredCodeUtils.get_parentname(name)
-    name, pc = LoweredCodeUtils.correct_name!(finish_and_return!, frame, pc, name, parentname)
-    @test name == parentname
 
     # Check output of methoddef!
     frame = JuliaInterpreter.prepare_thunk(Lowering, :(function nomethod end))
@@ -166,6 +157,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
     frame = JuliaInterpreter.prepare_thunk(Base, ex)
+    rename_framemethods!(frame)
     signatures = Set{Any}()
     methoddef!(signatures, frame; define=false)
     @test length(signatures) == 1
@@ -193,6 +185,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         end
     end
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
     @test length(signatures) == 2
@@ -201,12 +194,14 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         another_kwdef(x, y=1; z="hello") = 333
     end
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
     @test length(signatures) == 5
     @test Lowering.another_kwdef(0) == 333
     ex = :(@generated genkw2(; b=2) = nothing)  # https://github.com/timholy/Revise.jl/issues/290
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    # rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
     @test length(signatures) == 4
@@ -228,17 +223,20 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         end
     end
     frame = JuliaInterpreter.prepare_thunk(Base, ex)
+    rename_framemethods!(frame)
     empty!(signatures)
     stmt = JuliaInterpreter.pc_expr(frame)
     if !LoweredCodeUtils.ismethod(stmt)
         pc = JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod, frame, true)
     end
     pc, pc3 = methoddef!(signatures, frame; define=false)  # this tests that the return isn't `nothing`
+    pc, pc3 = methoddef!(signatures, frame; define=false)
     @test length(signatures) == 2  # both the GeneratedFunctionStub and the main method
 
     # With anonymous functions in signatures
     ex = :(const BitIntegerType = Union{map(T->Type{T}, Base.BitInteger_types)...})
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
     @test !isempty(signatures)
@@ -265,4 +263,49 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
     @test first(signatures).parameters[end] == Int
+
+    # Multiple keyword arg methods per frame
+    # (Revise issue #363)
+    ex = quote
+        keywrd1(x; kwarg=false) = 1
+        keywrd2(x; kwarg="hello") = 2
+        keywrd3(x; kwarg=:stuff) = 3
+    end
+    Core.eval(Lowering, ex)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    rename_framemethods!(frame)
+    empty!(signatures)
+    pc, pc3 = methoddef!(signatures, frame; define=false)
+    @test pc < length(frame.framecode.src.code)
+    kw2sig = Tuple{typeof(Lowering.keywrd2), Any}
+    @test kw2sig ∉ signatures
+    pc = methoddefs!(signatures, frame; define=false)
+    @test pc === nothing
+    @test kw2sig ∈ signatures
+
+    # Module-scoping
+    ex = :(Base.@irrational π        3.14159265358979323846  pi)
+    frame = JuliaInterpreter.prepare_thunk(Base.MathConstants, ex)
+    rename_framemethods!(frame)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=false)
+    @test !isempty(signatures)
+
+    # Inner methods in structs. Comes up in, e.g., Core.Compiler.Params.
+    # The body of CustomMS is an SSAValue.
+    ex = quote
+        struct MyStructWithMeth
+            x::Int
+            global function CustomMS(;x=1)
+                return new(x)
+            end
+            MyStructWithMeth(x) = new(x)
+        end
+    end
+    Core.eval(Lowering, ex)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    rename_framemethods!(frame)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=false)
+    @test Tuple{typeof(Lowering.CustomMS)} ∈ signatures
 end
