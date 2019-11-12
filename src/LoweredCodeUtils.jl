@@ -485,7 +485,7 @@ occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
 """
-function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecialize(stmt), pc::Int; define=true)
+function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
     framecode, pcin = frame.framecode, pc
     if ismethod3(stmt)
         pc3 = pc
@@ -656,12 +656,20 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     kwdefine = NamedTuple{(:define,),Tuple{Bool}}
     for ct in (Vector{Any}, Set{Any})
         f = methoddef!
-        @assert precompile(Tuple{typeof(f), Any, ct, Frame, Expr, Int})
-        # @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Any, ct, Frame, Expr, Int})
+        m = which(f, Tuple{Function, ct, Frame, Expr, Int})
+        @assert precompile(Tuple{typeof(f), Function, ct, Frame, Expr, Int})
+        mbody = bodymethod(m)
+        @assert precompile(Tuple{mbody.sig.parameters[1], Bool, typeof(f), Function, ct, Frame, Expr, Int})
+        @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Function, ct, Frame, Expr, Int})
         f = methoddefs!
         @assert precompile(Tuple{typeof(f), Any, ct, Frame})
-        # @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Any, ct, Frame})
+        @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Function, ct, Frame})
     end
+    @assert precompile(Tuple{typeof(rename_framemethods!), Any, Frame, Dict{Symbol,MethodInfo},
+                             Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}},
+                             Dict{Symbol,Union{Bool, Symbol}}})
+    @assert precompile(Tuple{typeof(identify_framemethod_calls), Frame})
+    @assert precompile(Tuple{typeof(callchain), Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}}})
 end
 
 end # module
