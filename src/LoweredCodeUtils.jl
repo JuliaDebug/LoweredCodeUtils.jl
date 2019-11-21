@@ -365,7 +365,7 @@ end
 rename_framemethods!(frame::Frame) = rename_framemethods!(finish_and_return!, frame)
 
 """
-    pctop, isgen = find_corrected_name(frame, pc, name, parentname)
+    pctop, isgen = find_corrected_name(recurse, frame, pc, name, parentname)
 
 Scans forward from `pc` in `frame` until a method is found that calls `name`.
 `pctop` points to the beginning of that method's signature.
@@ -374,16 +374,29 @@ Scans forward from `pc` in `frame` until a method is found that calls `name`.
 Alternatively, this returns `nothing` if `pc` does not appear to point to either
 a keyword or generated method.
 """
-function find_corrected_name(frame, pc, name, parentname)
+function find_corrected_name(@nospecialize(recurse), frame, pc, name, parentname)
     stmt = pc_expr(frame, pc)
     while true
+        pc0 = pc
         while !ismethod3(stmt)
             pc = next_or_nothing(frame, pc)
             pc === nothing && return nothing
             stmt = pc_expr(frame, pc)
         end
         body = stmt.args[3]
-        if stmt.args[1] != name
+        if stmt.args[1] != name && isa(body, SSAValue)
+            # OK, we can't skip all the stuff that might define the body
+            # See https://github.com/timholy/Revise.jl/issues/398
+            pc = pc0
+            stmt = pc_expr(frame, pc)
+            while !ismethod3(stmt)
+                pc = step_expr!(recurse, frame, stmt, true)
+                pc === nothing && return nothing
+                stmt = pc_expr(frame, pc)
+            end
+            body = @lookup(frame, stmt.args[3])
+        end
+        if stmt.args[1] != name && isa(body, CodeInfo)
             # This might be the GeneratedFunctionStub for a @generated method
             for (i, bodystmt) in enumerate(body.code)
                 if isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated
@@ -435,7 +448,7 @@ end
 
 function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
     # Get the correct name (the one that's actively running)
-    nameinfo = find_corrected_name(frame, pc, name, parentname)
+    nameinfo = find_corrected_name(recurse, frame, pc, name, parentname)
     if nameinfo === nothing
         pc = skip_until(stmt->isexpr(stmt, :method, 3), frame, pc)
         pc = next_or_nothing(frame, pc)
