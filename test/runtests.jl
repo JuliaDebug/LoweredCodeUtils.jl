@@ -8,6 +8,7 @@ using Test
 @test isempty(detect_ambiguities(LoweredCodeUtils, JuliaInterpreter, Base, Core))
 
 module Lowering
+using Parameters
 struct Caller end
 struct Gen{T} end
 end
@@ -308,4 +309,19 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
     @test Tuple{typeof(Lowering.CustomMS)} ∈ signatures
+
+    # https://github.com/timholy/Revise.jl/issues/398
+    ex = quote
+        @with_kw struct Items
+            n::Int
+            items::Vector{Int} = [i for i=1:n]
+        end
+    end
+    Core.eval(Lowering, ex)
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    dct = rename_framemethods!(frame)
+    ks = collect(filter(k->startswith(String(k), "#Items#"), keys(dct)))
+    @test length(ks) == 2
+    @test dct[ks[1]] == dct[ks[2]]
+    @test isdefined(Lowering, ks[1]) || isdefined(Lowering, ks[2])
 end
