@@ -455,6 +455,14 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
         return name, pc, nothing
     end
     pctop, isgen = nameinfo
+    # Sometimes signature_top---which follows SSAValue links backwards to find the first
+    # line needed to define the signature---misses out on a SlotNumber assignment.
+    # Fix https://github.com/timholy/Revise.jl/issues/422
+    stmt = pc_expr(frame, pctop)
+    while pctop > 1 && isa(stmt, SlotNumber) && !isassigned(frame.framedata.locals, pctop)
+        pctop -= 1
+        stmt = pc_expr(frame, pctop)
+    end   # end fix
     sigtparent, lastpcparent = signature(recurse, frame, pctop)
     sigtparent === nothing && return name, pc, lastpcparent
     methparent = whichtt(sigtparent)
