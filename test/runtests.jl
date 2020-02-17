@@ -13,6 +13,13 @@ struct Caller end
 struct Gen{T} end
 end
 
+# Stuff for https://github.com/timholy/Revise.jl/issues/422
+module Lowering422
+const LVec{N, T} = NTuple{N, Base.VecElement{T}}
+const LT{T} = Union{LVec{<:Any, T}, T}
+const FloatingTypes = Union{Float32, Float64}
+end
+
 bodymethtest0(x) = 0
 function bodymethtest0(x)
     y = 2x
@@ -324,4 +331,22 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     @test length(ks) == 2
     @test dct[ks[1]] == dct[ks[2]]
     @test isdefined(Lowering, ks[1]) || isdefined(Lowering, ks[2])
+
+    # https://github.com/timholy/Revise.jl/issues/422
+    ex = :(@generated function fneg(x::T) where T<:LT{<:FloatingTypes}
+         s = """
+         %2 = fneg $(llvm_type(T)) %0
+         ret $(llvm_type(T)) %2
+         """
+         return :(
+             $(Expr(:meta, :inline));
+             Base.llvmcall($s, T, Tuple{T}, x)
+         )
+     end)
+    empty!(signatures)
+    Core.eval(Lowering422, ex)
+    frame = JuliaInterpreter.prepare_thunk(Lowering422, ex)
+    rename_framemethods!(frame)
+    pc = methoddefs!(signatures, frame; define=false)
+    @test typeof(Lowering422.fneg) ∈ Set(Base.unwrap_unionall(sig).parameters[1] for sig in signatures)
 end
