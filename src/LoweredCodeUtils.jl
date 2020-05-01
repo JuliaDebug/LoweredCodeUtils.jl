@@ -172,10 +172,17 @@ end
 ##
 function isanonymous_typedef(src::CodeInfo)
     length(src.code) >= 4 || return false
-    stmt = src.code[end-1]
-    isexpr(stmt, :struct_type) || return false
-    name = stmt.args[1]::Symbol
-    return startswith(String(name), "#")
+    if VERSION >= v"1.5.0-DEV.702"
+        stmt = src.code[end-1]
+        (isexpr(stmt, :call) && is_global_ref(stmt.args[1], Core, :_typebody!)) || return false
+        name = stmt.args[2]::Symbol
+        return startswith(String(name), "#")
+    else
+        stmt = src.code[end-1]
+        isexpr(stmt, :struct_type) || return false
+        name = stmt.args[1]::Symbol
+        return startswith(String(name), "#")
+    end
 end
 
 function define_anonymous(@nospecialize(recurse), frame, stmt)
