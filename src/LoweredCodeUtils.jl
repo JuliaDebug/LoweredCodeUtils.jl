@@ -14,11 +14,11 @@ export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod
 
 Returns `true` is `stmt` is a call expression to `name`.
 """
-function iscallto(stmt, name)
+function iscallto(@nospecialize(stmt), name)
     if isexpr(stmt, :call)
         a = stmt.args[1]
-        a == name && return true
-        return is_global_ref(a, Core, :_apply) && stmt.args[2] == name
+        a === name && return true
+        return is_global_ref(a, Core, :_apply) && stmt.args[2] === name
     end
     return false
 end
@@ -28,7 +28,7 @@ end
 
 Returns the function (or Symbol) being called in a :call expression.
 """
-function getcallee(stmt)
+function getcallee(@nospecialize(stmt))
     if isexpr(stmt, :call)
         a = stmt.args[1]
         is_global_ref(a, Core, :_apply) && return stmt.args[2]
@@ -149,7 +149,7 @@ end
 signature(@nospecialize(recurse), frame::Frame, pc) = signature(recurse, frame, pc_expr(frame, pc), pc)
 signature(frame::Frame, pc) = signature(finish_and_return!, frame, pc)
 
-function minid(node, stmts, id)
+function minid(@nospecialize(node), stmts, id)
     if isa(node, SSAValue)
         id = min(id, node.id)
         stmt = stmts[node.id]
@@ -162,7 +162,7 @@ function minid(node, stmts, id)
     return id
 end
 
-function signature_top(frame, stmt, pc)
+function signature_top(frame, stmt::Expr, pc)
     @assert ismethod3(stmt)
     return minid(stmt.args[2], frame.framecode.src.code, pc)
 end
@@ -185,7 +185,7 @@ function isanonymous_typedef(src::CodeInfo)
     end
 end
 
-function define_anonymous(@nospecialize(recurse), frame, stmt)
+function define_anonymous(@nospecialize(recurse), frame, @nospecialize(stmt))
     while !isexpr(stmt, :method)
         pc = step_expr!(recurse, frame, stmt, true)
         stmt = pc_expr(frame, pc)
@@ -248,7 +248,7 @@ function identify_framemethod_calls(frame)
                 end
             end
         elseif ismethod1(stmt)
-            key = stmt.args[1]
+            key = stmt.args[1]::Symbol
             mi = get(methodinfos, key, nothing)
             if mi === nothing
                 methodinfos[key] = MethodInfo(i)
@@ -268,12 +268,14 @@ function identify_framemethod_calls(frame)
                 for (j, mstmt) in enumerate(msrc.code)
                     if isexpr(mstmt, :call)
                         mkey = mstmt.args[1]
-                        isa(key, Expr) && @show mkey
-                        haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                        if isa(mkey, Symbol)
+                            # Could be a GlobalRef but then it's outside frame
+                            haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                        end
                     elseif isexpr(mstmt, :meta) && mstmt.args[1] == :generated
                         newex = mstmt.args[2]
                         if isexpr(newex, :new) && length(newex.args) >= 2 && is_global_ref(newex.args[1], Core, :GeneratedFunctionStub)
-                            mkey = newex.args[2]
+                            mkey = newex.args[2]::Symbol
                             haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
                         end
                     end
@@ -391,7 +393,7 @@ function find_corrected_name(@nospecialize(recurse), frame, pc, name, parentname
             stmt = pc_expr(frame, pc)
         end
         body = stmt.args[3]
-        if stmt.args[1] != name && isa(body, SSAValue)
+        if stmt.args[1] !== name && isa(body, SSAValue)
             # OK, we can't skip all the stuff that might define the body
             # See https://github.com/timholy/Revise.jl/issues/398
             pc = pc0
@@ -403,10 +405,10 @@ function find_corrected_name(@nospecialize(recurse), frame, pc, name, parentname
             end
             body = @lookup(frame, stmt.args[3])
         end
-        if stmt.args[1] != name && isa(body, CodeInfo)
+        if stmt.args[1] !== name && isa(body, CodeInfo)
             # This might be the GeneratedFunctionStub for a @generated method
             for (i, bodystmt) in enumerate(body.code)
-                if isexpr(bodystmt, :meta) && bodystmt.args[1] == :generated
+                if isexpr(bodystmt, :meta) && bodystmt.args[1] === :generated
                     return signature_top(frame, stmt, pc), true
                 end
                 i >= 5 && break  # we should find this early
@@ -529,7 +531,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         end
         if isa(meth, Method)
             push!(signatures, meth.sig)
-        elseif stmt.args[1] == false
+        elseif stmt.args[1] === false
             # If it's anonymous and not defined, define it
             pc = step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
@@ -553,6 +555,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     if isa(name, Bool)
         error("not valid for anonymous methods")
     end
+    name = name::Symbol
     while true  # methods containing inner methods may need multiple trips through this loop
         sigt, pc = signature(recurse, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
@@ -570,7 +573,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame)
         meth = whichtt(sigt)
         isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
-        name == name3 && return pc, pc3     # if this was an inner method we should keep going
+        name === name3 && return pc, pc3     # if this was an inner method we should keep going
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
 end
@@ -614,7 +617,7 @@ function _methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; defi
     return pc
 end
 
-function is_self_call(stmt, slotnames, argno=1)
+function is_self_call(@nospecialize(stmt), slotnames, argno=1)
     if isa(stmt, Expr)
         if stmt.head == :call
             a = stmt.args[argno]
