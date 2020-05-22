@@ -20,9 +20,19 @@ branches:
 notifications:
   email: false
 
-script:
-    - export JULIA_PROJECT=""
-    - julia --project -e 'using Pkg; Pkg.build(); Pkg.test();'
+codecov: true
 
-after_success:
-  - julia -e 'import Pkg; Pkg.add("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
+jobs:
+  include:
+    - stage: "Documentation"
+      julia: 1.4
+      os: linux
+      arch: x64
+      script:
+        - julia --project=docs/ -e 'using Pkg; Pkg.instantiate(); Pkg.build()'
+        - julia --project=docs/ docs/make.jl
+      name: "HTML"
+      after_success: skip
+  exclude:
+  - os: osx
+    arch: x86

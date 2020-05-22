@@ -31,7 +31,7 @@ bodymethtest3(x::T, y=Dict(1=>2); z="hello") where T<:AbstractFloat = 3
 bodymethtest4(x, y=1) = 4
 bodymethtest5(x, y=Dict(1=>2)) = 5
 
-@testset "LoweredCodeUtils.jl" begin
+@testset "Signatures" begin
     signatures = Set{Any}()
     newcode = CodeInfo[]
     for ex in (:(f(x::Int8; y=0) = y),

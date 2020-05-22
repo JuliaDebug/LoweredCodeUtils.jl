@@ -134,7 +134,79 @@ end
     @test_throws MethodError ModSelective.feval1(1)
     @test_throws UndefVarError ModSelective.foo()
     @test_throws UndefVarError ModSelective.bar()
+    # Run test from the docs
+    # Lowered code isn't very suitable to jldoctest (it can vary with each Julia version),
+    # so better to run it here
+    ex = quote
+        s11 = 0
+        k11 = 5
+        for i = 1:3
+            global s11, k11
+            s11 += rand(1:5)
+            k11 += i
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    JuliaInterpreter.finish_and_return!(frame, true)
+    @test ModSelective.k11 == 11
+    @test 3 <= ModSelective.s11 <= 15
+    Core.eval(ModSelective, :(k11 = 0; s11 = -1))
+    edges = CodeEdges(frame.framecode.src)
+    isrequired = lines_required(:s11, frame.framecode.src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test ModSelective.k11 == 0
+    @test 3 <= ModSelective.s11 <= 15
 
-    # TODO: add printing tests
-    # LoweredCodeUtils.print_with_code(stdout, src, isrequired)
+    @testset "Display" begin
+        # worth testing because this has proven quite crucial for debugging and
+        # ensuring that these structures are as "self-documenting" as possible.
+        io = IOBuffer()
+        l = LoweredCodeUtils.Links(Int[], [3, 5], LoweredCodeUtils.NamedVar[:hello])
+        show(io, l)
+        str = String(take!(io))
+        @test occursin('∅', str)
+        @test !occursin("GlobalRef", str)
+        # CodeLinks
+        ex = quote
+            s = 0.0
+            for i = 1:5
+                global s
+                s += rand()
+            end
+            return s
+        end
+        lwr = Meta.lower(Main, ex)
+        src = lwr.args[1]
+        cl = LoweredCodeUtils.CodeLinks(src)
+        show(io, cl)
+        str = String(take!(io))
+        @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
+        @test occursin(r"succs: ssas: ∅, slots: \[\d+\], names: ∅;", str)
+        VERSION >= v"1.1" && @test occursin(r"s:\n  preds: ssas: \[\d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str)
+        VERSION >= v"1.1" && @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[:s\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+        LoweredCodeUtils.print_with_code(io, src, cl)
+        str = String(take!(io))
+        if isdefined(Base.IRShow, :show_ir_stmt)
+            @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
+            @test occursin("# see name s", str)
+            @test occursin("# see slot 1", str)
+            @test occursin(r"# preds: ssas: \[\d+\], slots: ∅, names: \[:s\]; succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+        else
+            @test occursin("No IR statement printer", str)
+        end
+        # CodeEdges
+        edges = CodeEdges(src)
+        show(io, edges)
+        str = String(take!(io))
+        VERSION >= v"1.1" && @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
+        VERSION >= v"1.1" && @test count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+        LoweredCodeUtils.print_with_code(io, src, edges)
+        str = String(take!(io))
+        if isdefined(Base.IRShow, :show_ir_stmt)
+            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
+            @test count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+        else
+            @test occursin("No IR statement printer", str)
+        end
+    end
 end

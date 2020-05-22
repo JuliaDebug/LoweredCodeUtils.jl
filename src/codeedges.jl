@@ -47,12 +47,12 @@ function CodeLinks(src::CodeInfo)
 end
 
 function Base.show(io::IO, cl::CodeLinks)
-    print("CodeLinks:")
+    print(io, "CodeLinks:")
     print_slots(io, cl)
     print_names(io, cl)
     nstmts = length(cl.ssapreds)
     nd = ndigits(nstmts)
-    print("\nCode:")
+    print(io, "\nCode:")
     for i = 1:nstmts
         print(io, '\n', lpad(i, nd), " preds: ")
         show(io, cl.ssapreds[i])
@@ -89,7 +89,7 @@ function print_names(io::IO, cl::CodeLinks)
         end
         if haskey(cl.nameassigns, key)
             print(io, "\n  assign @: ")
-            show(io, cl.slotassigns[key])
+            show(io, cl.nameassigns[key])
         end
     end
 end
@@ -125,6 +125,14 @@ else
     print_with_code(preprint, postprint, io::IO, src::CodeInfo) = print(io, "No IR statement printer available on this version of Julia")
 end
 
+"""
+    print_with_code(io, src::CodeInfo, cl::CodeLinks)
+
+Interweave display of code and links.
+
+!!! compat Julia 1.6
+    This function produces dummy output if suitable support is missing in your version of Julia.
+"""
 function print_with_code(io::IO, src::CodeInfo, cl::CodeLinks)
     function preprint(io::IO)
         print(io, "Slots:")
@@ -155,7 +163,7 @@ function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks)
         end
     else
         preds, succs = cl.ssapreds[idx], cl.ssasuccs[idx]
-        printstyled(io, "preds: ", preds, ", succs: ", succs, '\n', color=:yellow)
+        printstyled(io, "preds: ", preds, " succs: ", succs, '\n', color=:yellow)
     end
     return nothing
 end
@@ -295,15 +303,15 @@ CodeEdges(n::Integer) = CodeEdges([Int[] for i = 1:n], [Int[] for i = 1:n], Dict
 
 function Base.show(io::IO, edges::CodeEdges)
     println(io, "CodeEdges:")
+    for (name, v) in edges.byname
+        print(io, "  ", name, ": ")
+        show(io, v)
+        println(io)
+    end
     n = length(edges.preds)
     nd = ndigits(n)
     for i = 1:n
         println(io, "  statement ", lpad(i, nd), " depends on ", showempty(edges.preds[i]), " and is used by ", showempty(edges.succs[i]))
-    end
-    for (name, v) in edges.byname
-        print(io, "  ", name, ' ')
-        show(io, v)
-        println(io)
     end
     return nothing
 end
@@ -413,6 +421,14 @@ function CodeEdges(src::CodeInfo)
     return edges
 end
 
+"""
+    print_with_code(io, src::CodeInfo, edges::CodeEdges)
+
+Interweave display of code and edges.
+
+!!! compat Julia 1.6
+    This function produces dummy output if suitable support is missing in your version of Julia.
+"""
 function print_with_code(io::IO, src::CodeInfo, edges::CodeEdges)
     function preprint(io::IO)
         printstyled(io, "Names:", color=:yellow)
@@ -598,7 +614,14 @@ function selective_eval_fromstart!(frame::Frame, isrequired::AbstractVector{Bool
     selective_eval_fromstart!(finish_and_return!, frame, isrequired, istoplevel)
 end
 
+"""
+    print_with_code(io, src::CodeInfo, isrequired::AbstractVector{Bool})
 
+Mark each line of code with its requirement status.
+
+!!! compat Julia 1.6
+    This function produces dummy output if suitable support is missing in your version of Julia.
+"""
 function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool})
     nd = ndigits(length(isrequired))
     preprint(::IO) = nothing
