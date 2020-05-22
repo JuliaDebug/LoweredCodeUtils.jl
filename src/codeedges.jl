@@ -110,11 +110,12 @@ if isdefined(Base.IRShow, :show_ir_stmt)
         line_info_preprinter = Base.IRShow.lineinfo_disabled
         line_info_postprinter = Base.IRShow.default_expr_type_printer
         preprint(io)
-        bb_idx = 1
+        bb_idx_prev = bb_idx = 1
         for idx = 1:length(src.code)
             preprint(io, idx)
             bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
-            postprint(io, idx)
+            postprint(io, idx, bb_idx != bb_idx_prev)
+            bb_idx_prev = bb_idx
         end
         max_bb_idx_size = ndigits(length(cfg.blocks))
         line_info_preprinter(io, " "^(max_bb_idx_size + 2), typemin(Int32))
@@ -143,12 +144,13 @@ function print_with_code(io::IO, src::CodeInfo, cl::CodeLinks)
     end
     preprint(::IO, ::Int) = nothing
     postprint(::IO) = nothing
-    postprint(io::IO, idx::Int) = postprint_linelinks(io, idx, src, cl)
+    postprint(io::IO, idx::Int, bbchanged::Bool) = postprint_linelinks(io, idx, src, cl, bbchanged)
 
     print_with_code(preprint, postprint, io, src)
 end
 
-function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks)
+function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks, bbchanged::Bool)
+    printstyled(io, bbchanged ? " " : "│", color=:light_black)
     printstyled(io, "             # ", color=:yellow)
     stmt = src.code[idx]
     if isexpr(stmt, :(=))
@@ -440,12 +442,13 @@ function print_with_code(io::IO, src::CodeInfo, edges::CodeEdges)
     end
     preprint(::IO, ::Int) = nothing
     postprint(::IO) = nothing
-    postprint(io::IO, idx::Int) = postprint_lineedges(io, idx, edges)
+    postprint(io::IO, idx::Int, bbchanged::Bool) = postprint_lineedges(io, idx, edges, bbchanged)
 
     print_with_code(preprint, postprint, io, src)
 end
 
-function postprint_lineedges(io::IO, idx::Int, edges::CodeEdges)
+function postprint_lineedges(io::IO, idx::Int, edges::CodeEdges, bbchanged::Bool)
+    printstyled(io, bbchanged ? " " : "│", color=:light_black)
     printstyled(io, "             # ", color=:yellow)
     preds, succs = edges.preds[idx], edges.succs[idx]
     printstyled(io, "preds: ", showempty(preds), ", succs: ", showempty(succs), '\n', color=:yellow)
@@ -627,7 +630,7 @@ function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool}
     preprint(::IO) = nothing
     preprint(io::IO, idx::Int) = print(io, lpad(idx, nd), ' ', isrequired[idx] ? "t " : "f ")
     postprint(::IO) = nothing
-    postprint(io::IO, idx::Int) = nothing
+    postprint(io::IO, idx::Int, bbchanged::Bool) = nothing
 
     print_with_code(preprint, postprint, io, src)
 end
