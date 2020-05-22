@@ -446,7 +446,7 @@ If `isrequired[i]` is `false`, the `i`th statement is *not* required.
 In some circumstances all statements marked `true` may be needed, in others control-flow
 will end up skipping a subset of such statements, perhaps while repeating others multiple times.
 
-See also [`lines_required!](@ref) and [`selective_eval!`](@ref).
+See also [`lines_required!`](@ref) and [`selective_eval!`](@ref).
 """
 function lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges)
     isrequired = falses(length(edges.preds))
@@ -462,7 +462,7 @@ function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges)
 end
 
 """
-    lines_required!(isrequired::AbstractVector{Bool}, edges::CodeEdges)
+    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges)
 
 Like `lines_required`, but where `isrequired[idx]` has already been set to `true` for all statements
 that you know you need to evaluate. All other statements should be marked `false` at entry.

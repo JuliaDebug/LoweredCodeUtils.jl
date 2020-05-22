@@ -1,0 +1,34 @@
+# API
+
+## Signatures
+
+```@docs
+signature
+methoddef!
+rename_framemethods!
+bodymethod
+```
+
+## Edges
+
+```@docs
+CodeEdges
+lines_required
+lines_required!
+selective_eval!
+selective_eval_fromstart!
+```
+
+## Internal utilities
+
+```@docs
+LoweredCodeUtils.next_or_nothing
+LoweredCodeUtils.skip_until
+LoweredCodeUtils.MethodInfo
+LoweredCodeUtils.identify_framemethod_calls
+LoweredCodeUtils.iscallto
+LoweredCodeUtils.getcallee
+LoweredCodeUtils.find_corrected_name
+LoweredCodeUtils.replacename!
+LoweredCodeUtils.Variable
+```
