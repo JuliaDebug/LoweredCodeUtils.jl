@@ -22,6 +22,7 @@ selective_eval_fromstart!
 ## Internal utilities
 
 ```@docs
+LoweredCodeUtils.print_with_code
 LoweredCodeUtils.next_or_nothing
 LoweredCodeUtils.skip_until
 LoweredCodeUtils.MethodInfo

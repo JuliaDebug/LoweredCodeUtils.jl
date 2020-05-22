@@ -9,5 +9,6 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/JuliaDebug/LoweredCodeUtils.jl.git"
+    repo = "github.com/JuliaDebug/LoweredCodeUtils.jl.git",
+    push_preview = true
 )
