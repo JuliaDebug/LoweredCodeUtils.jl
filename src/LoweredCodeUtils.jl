@@ -28,7 +28,7 @@ if ccall(:jl_generating_output, Cint, ()) == 1
         m = which(f, Tuple{Function, ct, Frame, Expr, Int})
         @assert precompile(Tuple{typeof(f), Function, ct, Frame, Expr, Int})
         mbody = bodymethod(m)
-        @assert precompile(Tuple{mbody.sig.parameters[1], Bool, typeof(f), Function, ct, Frame, Expr, Int})
+        # @assert precompile(Tuple{mbody.sig.parameters[1], Bool, typeof(f), Function, ct, Frame, Expr, Int})
         @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Function, ct, Frame, Expr, Int})
         f = methoddefs!
         @assert precompile(Tuple{typeof(f), Any, ct, Frame})
@@ -41,6 +41,10 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     @assert precompile(Tuple{typeof(callchain), Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}}})
 
     @assert precompile(CodeEdges, (CodeInfo,))
+    @assert precompile(add_links!, (Pair{JuliaInterpreter.SSAValue,Links}, Any, CodeLinks))
+    @assert precompile(add_links!, (Pair{JuliaInterpreter.SlotNumber,Links}, Any, CodeLinks))
+    @assert precompile(add_links!, (Pair{Symbol,Links}, Any, CodeLinks))
+    @assert precompile(lines_required!, (Vector{Bool}, Set{NamedVar}, CodeInfo, CodeEdges))
 end
 
 end # module

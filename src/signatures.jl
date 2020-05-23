@@ -571,7 +571,10 @@ function bodymethod(mkw::Method)
     stmt = src.code[end-1]
     if isexpr(stmt, :call) && (f = stmt.args[1]; isa(f, QuoteNode))
         # Check that it has a #self# call
-        hasself = any(i->is_self_call(stmt, src.slotnames, i), 2:length(stmt.args))
+        hasself = false
+        for i = 2:length(stmt.args)
+            hasself |= is_self_call(stmt, src.slotnames, i)
+        end
         hasself || return m
         f = f.value
         mths = methods(f)
