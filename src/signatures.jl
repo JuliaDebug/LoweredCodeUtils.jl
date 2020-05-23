@@ -554,7 +554,7 @@ function bodymethod(mkw::Method)
     local src
     while true
         framecode = JuliaInterpreter.get_framecode(m)
-        fakeargs = Any[nothing for i = 1:length(framecode.scope.nargs)]
+        fakeargs = Any[nothing for i = 1:framecode.scope.nargs]
         frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
         src = framecode.src
         (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
