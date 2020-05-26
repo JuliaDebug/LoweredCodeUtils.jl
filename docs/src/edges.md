@@ -122,7 +122,7 @@ Consequently all the line-dependencies of this slot variable have
 been aggregated into a single list by determining the "global"
 influences on that slot variable.
 
-On suitable versions of Julia, an even more useful output can be obtained from the following:
+An even more useful output can be obtained from the following:
 ```
 julia> LoweredCodeUtils.print_with_code(stdout, lwr.args[1], edges)
 Names:
@@ -182,7 +182,7 @@ Code:
 Here the edges are printed right after each line.
 
 !!! note
-    Useful output from `print_with_code` requires at least version 1.6 of Julia.
+    Useful output from `print_with_code` requires at least version 1.6.0-DEV.95 of Julia.
 
 Suppose we want to evaluate just the lines needed to compute `s`.
 We can find out which lines these are with
@@ -216,7 +216,7 @@ julia> isrequired = lines_required(:s, lwr.args[1], edges)
  0
 ```
 
-and display them (given a suitable version of Julia) with
+and display them with
 
 ```
 julia> LoweredCodeUtils.print_with_code(stdout, lwr.args[1], isrequired)
