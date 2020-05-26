@@ -548,6 +548,13 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                     changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
+                for ibb in bb.succs
+                    ibb == length(bbs.blocks) && continue
+                    rpred = rng(bbs.blocks[ibb])
+                    idxlast = rpred[end]
+                    changed |= !isrequired[idxlast]
+                    isrequired[idxlast] = true
+                end
             end
         end
         # In preparation for the next round, add any new named objects

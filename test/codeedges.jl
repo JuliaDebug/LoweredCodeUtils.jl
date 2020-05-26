@@ -1,5 +1,6 @@
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
+using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
 # # Utilities for finding statements corresponding to particular calls
@@ -11,6 +12,58 @@ using Test
 #     end
 #     return LoweredCodeUtils.iscallto(stmt, fsym)
 # end
+
+function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
+    haseval = false
+    if isa(stmt, Expr)
+        if stmt.head === :call
+            haseval = JuliaInterpreter.hasarg(isequal(:eval), stmt.args)
+            f = stmt.args[1]
+            is_global_ref(f, Core, :_typebody!) && return true, haseval
+            if isdefined(Core, :_typebody!)
+                is_quotenode(f, Core._typebody!) && return true, haseval
+            end
+            is_global_ref(f, Core, :_setsuper!) && return true, haseval
+            if isdefined(Core, :_setsuper!)
+                is_quotenode(f, Core._setsuper!) && return true, haseval
+            end
+            f === :include && return true, haseval
+        end
+        stmt.head ∈ heads && return true, haseval
+        if stmt.head == :thunk
+            any(s->any(hastrackedexpr(s; heads=heads)), stmt.args[1].code) && return true, haseval
+        end
+    end
+    return false, haseval
+end
+
+function minimal_evaluation(src::Core.CodeInfo, edges::CodeEdges)
+    musteval = fill(false, length(src.code))
+    for (i, stmt) in enumerate(src.code)
+        if !musteval[i]
+            musteval[i], haseval = hastrackedexpr(stmt)
+            if haseval
+                musteval[edges.succs[i]] .= true
+            end
+        end
+    end
+    # All tracked expressions are marked. Now add their dependencies.
+    lines_required!(musteval, src, edges)
+    # Struct definitions likely omitted const/global. Look for them via name.
+    for (name, var) in edges.byname
+        if !isempty(var.assigned) && any(i->musteval[i], var.succs)
+            foreach(var.succs) do i
+                stmt = src.code[i]
+                if isa(stmt, Expr)
+                    if stmt.head === :global || stmt.head === :const
+                        musteval[i] = true
+                    end
+                end
+            end
+        end
+    end
+    return musteval
+end
 
 function allmissing(mod::Module, names)
     for name in names
@@ -105,7 +158,7 @@ end
     Core.eval(ModEval, ex)
     @test ModSelective.a3 === ModEval.a3 == 2
     @test allmissing(ModSelective, (:z3, :x3, :y3))
-    
+
     # Capturing dependencies of an `@eval` statement
     interpT = Expr(:$, :T)   # $T that won't get parsed during file-loading
     ex = quote
@@ -156,6 +209,23 @@ end
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
+
+    # Control-flow in a structure definition
+    ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test supertype(ModSelective.StructParent) === AbstractArray
+    # Also check redefinition (it's OK when the definition doesn't change)
+    Core.eval(ModEval, ex)
+    frame = JuliaInterpreter.prepare_thunk(ModEval, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test supertype(ModEval.StructParent) === AbstractArray
 
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and
