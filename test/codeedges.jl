@@ -227,6 +227,18 @@ end
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModEval.StructParent) === AbstractArray
 
+    # Anonymous functions
+    ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = fill(false, length(src.code))
+    @assert Meta.isexpr(src.code[end-1], :method, 3)
+    isrequired[end-1] = true
+    lines_required!(isrequired, src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test ModSelective.max_values(Int16) === 65536
+
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and
         # ensuring that these structures are as "self-documenting" as possible.

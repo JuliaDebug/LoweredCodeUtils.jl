@@ -183,7 +183,28 @@ end
 
 function direct_links!(cl::CodeLinks, src::CodeInfo)
     for (i, stmt) in enumerate(src.code)
-        if isexpr(stmt, :(=))
+        if isexpr(stmt, :thunk) && isa(stmt.args[1], CodeInfo)
+            icl = CodeLinks(stmt.args[1])
+            for (name, assigns) in icl.nameassigns
+                assign = get(cl.nameassigns, name, nothing)
+                if assign === nothing
+                    cl.nameassigns[name] = assign = Int[]
+                end
+                push!(assign, i)
+            end
+            continue
+        elseif isexpr(stmt, :method)
+            name = stmt.args[1]
+            if isa(name, Symbol)
+                assign = get(cl.nameassigns, name, nothing)
+                if assign === nothing
+                    cl.nameassigns[name] = assign = Int[]
+                end
+                push!(assign, i)
+            end
+            rhs = stmt
+            target = SSAValue(i)=>cl.ssapreds[i]
+        elseif isexpr(stmt, :(=))
             # An assignment
             stmt = stmt::Expr
             lhs, rhs = stmt.args[1], stmt.args[2]
@@ -503,6 +524,14 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         end
         return isrequired
     end
+    function add_succs!(isrequired, idx, edges::CodeEdges, succs)
+        for p in succs
+            isrequired[p] && continue
+            isrequired[p] = true
+            add_succs!(isrequired, p, edges, edges.succs[p])
+        end
+        return isrequired
+    end
 
     bbs = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
     changed = true
@@ -517,6 +546,10 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                 for d in def
                     isrequired[d] = true
                     add_preds!(isrequired, d, edges)
+                    if isexpr(src.code[d], :thunk) && startswith(String(obj), '#')
+                        # For anonymous types, we also want their associated methods
+                        add_succs!(isrequired, d, edges, edges.byname[obj].succs)
+                    end
                 end
             end
         end
