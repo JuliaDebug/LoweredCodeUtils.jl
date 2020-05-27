@@ -208,7 +208,7 @@ end
     edges = CodeEdges(src)
     # Check that the StructParent name is discovered everywhere it is used
     var = edges.byname[:StructParent]
-    @test var.preds[1] ∈ var.succs
+    @test var.preds[end] ∈ var.succs
     isrequired = minimal_evaluation(src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModSelective.StructParent) === AbstractArray

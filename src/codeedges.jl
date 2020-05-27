@@ -203,7 +203,7 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                 push!(assign, i)
             end
             continue
-        elseif isexpr(stmt, :method)
+        elseif isa(stmt, Expr) && stmt.head ∈ trackedheads
             name = stmt.args[1]
             if isa(name, Symbol)
                 assign = get(cl.nameassigns, name, nothing)
@@ -211,6 +211,12 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                     cl.nameassigns[name] = assign = Int[]
                 end
                 push!(assign, i)
+                targetstore = get(cl.namepreds, name, nothing)
+                if targetstore === nothing
+                    cl.namepreds[name] = targetstore = Links()
+                end
+                target = name=>targetstore
+                add_links!(target, stmt, cl)
             end
             rhs = stmt
             target = SSAValue(i)=>cl.ssapreds[i]
@@ -294,7 +300,7 @@ function Base.push!(l::Links, id)
     return id
 end
 
-## Phase 2: replacing name-links with statement-links
+## Phase 2: replacing slot-links with statement-links (and adding name-links to statement-links)
 
 # Now that we know the full set of dependencies, we can safely replace references to names
 # by references to the relevant line numbers.
@@ -375,12 +381,23 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
         end
         return dest
     end
+    # The main task here is to elide the slot-dependencies and convert
+    # everything to just ssas & names.
+    # Hence we "follow" slot links to their non-slot leaves.
+    function follow_links!(marked, l::Links, slotlinks, slotassigns, slothandled)
+        pushall!(marked, l.ssas)
+        for id in l.slots
+            slothandled[id] && continue
+            slothandled[id] = true
+            pushall!(marked, slotassigns[id])
+            follow_links!(marked, slotlinks[id], slotlinks, slotassigns, slothandled)
+        end
+        return marked
+    end
 
-    src.inferred && error("supply lowered but not inferred code")
-    cl = CodeLinks(src)
-    # Phase 2: replace named intermediates (slot & named-variable references) with statement numbers
+    # Replace/add named intermediates (slot & named-variable references) with statement numbers
     nstmts, nslots = length(src.code), length(src.slotnames)
-    marked = BitSet()  # working storage during resolution
+    marked, slothandled = BitSet(), fill(false, nslots)  # working storage during resolution
     edges = CodeEdges(nstmts)
     emptylink = Links()
     emptylist = Int[]
@@ -407,12 +424,9 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
         # Assign the predecessors
         # For "named" predecessors, we depend only on their assignments
         empty!(marked)
-        pushall!(marked, cl.ssapreds[i].ssas)
-        pushall!(marked, linkpreds.ssas)
+        fill!(slothandled, false)
+        follow_links!(marked, linkpreds, cl.slotpreds, cl.slotassigns, slothandled)
         pushall!(marked, listassigns)
-        for j in linkpreds.slots
-            pushall!(marked, cl.slotassigns[j])
-        end
         for key in linkpreds.names
             pushall!(marked, get(cl.nameassigns, key, emptylist))
         end
@@ -420,12 +434,9 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
         append!(edges.preds[i], marked)
         # Similarly for successors
         empty!(marked)
-        pushall!(marked, cl.ssasuccs[i].ssas)
-        pushall!(marked, linksuccs.ssas)
+        fill!(slothandled, false)
+        follow_links!(marked, linksuccs, cl.slotsuccs, cl.slotassigns, slothandled)
         pushall!(marked, listassigns)
-        for j in linksuccs.slots
-            pushall!(marked, cl.slotassigns[j])
-        end
         for key in linksuccs.names
             pushall!(marked, get(cl.nameassigns, key, emptylist))
         end
@@ -451,6 +462,7 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
         pushall!(marked, linksuccs.ssas)
         for j in linksuccs.slots
             pushall!(marked, cl.slotassigns[j])
+            pushall!(marked, cl.slotsuccs[j].ssas)
         end
         for key in linksuccs.names
             pushall!(marked, get(cl.nameassigns, key, emptylist))
