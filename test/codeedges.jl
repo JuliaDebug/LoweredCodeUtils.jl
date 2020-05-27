@@ -1,5 +1,6 @@
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
+using LoweredCodeUtils: caller_matches
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
@@ -17,21 +18,15 @@ function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
     haseval = false
     if isa(stmt, Expr)
         if stmt.head === :call
-            haseval = JuliaInterpreter.hasarg(isequal(:eval), stmt.args)
             f = stmt.args[1]
-            is_global_ref(f, Core, :_typebody!) && return true, haseval
-            if isdefined(Core, :_typebody!)
-                is_quotenode(f, Core._typebody!) && return true, haseval
-            end
-            is_global_ref(f, Core, :_setsuper!) && return true, haseval
-            if isdefined(Core, :_setsuper!)
-                is_quotenode(f, Core._setsuper!) && return true, haseval
-            end
+            haseval = f === :eval || (caller_matches(f, Base, :getproperty) && is_quotenode(stmt.args[2], :eval))
+            caller_matches(f, Core, :_typebody!) && return true, haseval
+            caller_matches(f, Core, :_setsuper!) && return true, haseval
             f === :include && return true, haseval
-        end
-        stmt.head ∈ heads && return true, haseval
-        if stmt.head == :thunk
+        elseif stmt.head === :thunk
             any(s->any(hastrackedexpr(s; heads=heads)), stmt.args[1].code) && return true, haseval
+        elseif stmt.head ∈ heads
+            return true, haseval
         end
     end
     return false, haseval
@@ -87,8 +82,7 @@ end
         k = rand()
         b = 2*a + 5
     end
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Check that the result of direct evaluation agrees with selective evaluation
@@ -127,8 +121,7 @@ end
             a2 = 2
         end
     end
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = lines_required(:a2, src, edges)
@@ -149,8 +142,7 @@ end
             y3 = 7
         end
     end
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = lines_required(:a3, src, edges)
@@ -171,8 +163,7 @@ end
     Core.eval(ModEval, ex)
     @test ModEval.foo() == 0
     @test ModEval.bar() == 1
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Mark just the load of Core.eval
@@ -286,6 +277,17 @@ end
         VERSION >= v"1.1" && @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
         VERSION >= v"1.1" && @test count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
         LoweredCodeUtils.print_with_code(io, src, edges)
+        str = String(take!(io))
+        if isdefined(Base.IRShow, :show_ir_stmt)
+            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
+            @test count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+        else
+            @test occursin("No IR statement printer", str)
+        end
+        # Works with Frames too
+        frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+        edges = CodeEdges(frame.framecode.src)
+        LoweredCodeUtils.print_with_code(io, frame, edges)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
             @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)

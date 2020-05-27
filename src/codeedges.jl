@@ -123,7 +123,17 @@ if isdefined(Base.IRShow, :show_ir_stmt)
         return nothing
     end
 else
-    print_with_code(preprint, postprint, io::IO, src::CodeInfo) = print(io, "No IR statement printer available on this version of Julia")
+    function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
+        println(io, "No IR statement printer available on this version of Julia, just aligning statements.")
+        preprint(io)
+        for idx = 1:length(src.code)
+            preprint(io, idx)
+            print(io, src.code[idx])
+            println(io)
+            postprint(io, idx, false)
+        end
+        postprint(io)
+    end
 end
 
 """
@@ -185,7 +195,7 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
     for (i, stmt) in enumerate(src.code)
         if isexpr(stmt, :thunk) && isa(stmt.args[1], CodeInfo)
             icl = CodeLinks(stmt.args[1])
-            for (name, assigns) in icl.nameassigns
+            for (name, _) in icl.nameassigns
                 assign = get(cl.nameassigns, name, nothing)
                 if assign === nothing
                     cl.nameassigns[name] = assign = Int[]
@@ -353,6 +363,12 @@ Analyze `src` and determine the chain of dependencies.
   for an object `v::Union{Symbol,GlobalRef}`.
 """
 function CodeEdges(src::CodeInfo)
+    src.inferred && error("supply lowered but not inferred code")
+    cl = CodeLinks(src)
+    CodeEdges(src, cl)
+end
+
+function CodeEdges(src::CodeInfo, cl::CodeLinks)
     function pushall!(dest, src)
         for item in src
             push!(dest, item)
@@ -463,7 +479,12 @@ function print_with_code(io::IO, src::CodeInfo, edges::CodeEdges)
         end
         printstyled(io, "\nCode:\n", color=:yellow)
     end
-    preprint(::IO, ::Int) = nothing
+    @static if isdefined(Base.IRShow, :show_ir_stmt)
+        preprint(::IO, ::Int) = nothing
+    else
+        nd = ndigits(length(src.code))
+        preprint(io::IO, i::Int) = print(io, lpad(i, nd), "  ")
+    end
     postprint(::IO) = nothing
     postprint(io::IO, idx::Int, bbchanged::Bool) = postprint_lineedges(io, idx, edges, bbchanged)
 
@@ -606,6 +627,14 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     return isrequired
 end
 
+function caller_matches(f, mod, sym)
+    is_global_ref(f, mod, sym) && return true
+    if isdefined(mod, sym)
+        is_quotenode(f, getfield(mod, sym)) && return true
+    end
+    return false
+end
+
 """
     selective_eval!([recurse], frame::Frame, isrequired::AbstractVector{Bool}, istoplevel=false)
 
@@ -675,4 +704,13 @@ function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool}
     postprint(io::IO, idx::Int, bbchanged::Bool) = nothing
 
     print_with_code(preprint, postprint, io, src)
+end
+
+function print_with_code(io::IO, frame::Frame, obj)
+    src = frame.framecode.src
+    if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
+        src = JuliaInterpreter.copy_codeinfo(src)
+        JuliaInterpreter.reverse_lookup_globalref!(src.code)
+    end
+    print_with_code(io, src, obj)
 end
