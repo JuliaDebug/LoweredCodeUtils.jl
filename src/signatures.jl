@@ -43,7 +43,7 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
         if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
             lastpc = pc = define_anonymous(recurse, frame, stmt)
-        elseif isexpr(stmt, :call) && JuliaInterpreter.is_quotenode(stmt.args[1], Core.Typeof) &&
+        elseif isexpr(stmt, :call) && is_quotenode(stmt.args[1], Core.Typeof) &&
                (sym = stmt.args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
             return nothing, pc
         else

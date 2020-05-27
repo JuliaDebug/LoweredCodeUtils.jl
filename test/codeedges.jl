@@ -210,11 +210,14 @@ end
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
 
-    # Control-flow in a structure definition
+    # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
     frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
+    # Check that the StructParent name is discovered everywhere it is used
+    var = edges.byname[:StructParent]
+    @test var.preds[1] ∈ var.succs
     isrequired = minimal_evaluation(src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModSelective.StructParent) === AbstractArray

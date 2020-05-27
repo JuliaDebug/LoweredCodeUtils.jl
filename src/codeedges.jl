@@ -264,6 +264,8 @@ function add_links!(target::Pair{<:Any,Links}, @nospecialize(stmt), cl::CodeLink
         for i in arng
             add_links!(target, stmt.args[i], cl)
         end
+    elseif isa(stmt, QuoteNode)
+        add_links!(target, stmt.value, cl)
     end
     return nothing
 end
