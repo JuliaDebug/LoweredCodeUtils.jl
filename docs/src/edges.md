@@ -182,7 +182,7 @@ Code:
 Here the edges are printed right after each line.
 
 !!! note
-    Useful output from `print_with_code` requires at least version 1.6.0-DEV.95 of Julia.
+    "Nice" output from `print_with_code` requires at least version 1.6.0-DEV.95 of Julia.
 
 Suppose we want to evaluate just the lines needed to compute `s`.
 We can find out which lines these are with

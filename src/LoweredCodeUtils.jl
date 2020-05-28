@@ -1,10 +1,14 @@
 module LoweredCodeUtils
 
+if isdefined(Base, :Experimental) && isdefined(Base.Experimental, Symbol("@optlevel"))
+    @eval Base.Experimental.@optlevel 1
+end
+
 using Core: SimpleVector, CodeInfo, NewvarNode, GotoNode
 using Base.Meta: isexpr
 using JuliaInterpreter
 using JuliaInterpreter: SSAValue, SlotNumber, Frame
-using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, whichtt,
+using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, is_quotenode, whichtt,
                         next_until!, finish_and_return!, get_return, nstatements, codelocation
 
 const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
@@ -12,8 +16,8 @@ const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
 const structheads = VERSION >= v"1.5.0-DEV.702" ? () : (:struct_type, :abstract_type, :primitive_type)
 const trackedheads = (:method, structheads...)
 
-export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod, CodeEdges,
-       lines_required, lines_required!, selective_eval!, selective_eval_fromstart!
+export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod
+export CodeEdges, lines_required, lines_required!, selective_eval!, selective_eval_fromstart!
 
 include("utils.jl")
 include("signatures.jl")

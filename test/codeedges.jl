@@ -1,16 +1,41 @@
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
+using LoweredCodeUtils: callee_matches
+using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
-# # Utilities for finding statements corresponding to particular calls
-# function callpredicate(@nospecialize(stmt), fsym)
-#     isa(stmt, Expr) || return false
-#     head = stmt.head
-#     if head === :(=)
-#         return callpredicate(stmt.args[2], fsym)
-#     end
-#     return LoweredCodeUtils.iscallto(stmt, fsym)
-# end
+function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
+    haseval = false
+    if isa(stmt, Expr)
+        if stmt.head === :call
+            f = stmt.args[1]
+            haseval = f === :eval || (callee_matches(f, Base, :getproperty) && is_quotenode(stmt.args[2], :eval))
+            callee_matches(f, Core, :_typebody!) && return true, haseval
+            callee_matches(f, Core, :_setsuper!) && return true, haseval
+            f === :include && return true, haseval
+        elseif stmt.head === :thunk
+            any(s->any(hastrackedexpr(s; heads=heads)), stmt.args[1].code) && return true, haseval
+        elseif stmt.head ∈ heads
+            return true, haseval
+        end
+    end
+    return false, haseval
+end
+
+function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges; kwargs...)
+    isrequired = fill(false, length(src.code))
+    for (i, stmt) in enumerate(src.code)
+        if !isrequired[i]
+            isrequired[i], haseval = predicate(stmt)
+            if haseval
+                isrequired[edges.succs[i]] .= true
+            end
+        end
+    end
+    # All tracked expressions are marked. Now add their dependencies.
+    lines_required!(isrequired, src, edges; kwargs...)
+    return isrequired
+end
 
 function allmissing(mod::Module, names)
     for name in names
@@ -34,8 +59,7 @@ end
         k = rand()
         b = 2*a + 5
     end
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Check that the result of direct evaluation agrees with selective evaluation
@@ -74,8 +98,7 @@ end
             a2 = 2
         end
     end
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = lines_required(:a2, src, edges)
@@ -96,8 +119,7 @@ end
             y3 = 7
         end
     end
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = lines_required(:a3, src, edges)
@@ -105,7 +127,7 @@ end
     Core.eval(ModEval, ex)
     @test ModSelective.a3 === ModEval.a3 == 2
     @test allmissing(ModSelective, (:z3, :x3, :y3))
-    
+
     # Capturing dependencies of an `@eval` statement
     interpT = Expr(:$, :T)   # $T that won't get parsed during file-loading
     ex = quote
@@ -118,8 +140,7 @@ end
     Core.eval(ModEval, ex)
     @test ModEval.foo() == 0
     @test ModEval.bar() == 1
-    lwr = Meta.lower(ModSelective, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, lwr)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Mark just the load of Core.eval
@@ -156,6 +177,101 @@ end
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
+
+    # Control-flow in an abstract type definition
+    ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    # Check that the StructParent name is discovered everywhere it is used
+    var = edges.byname[:StructParent]
+    @test var.preds[end] ∈ var.succs
+    isrequired = minimal_evaluation(hastrackedexpr, src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test supertype(ModSelective.StructParent) === AbstractArray
+    # Also check redefinition (it's OK when the definition doesn't change)
+    Core.eval(ModEval, ex)
+    frame = JuliaInterpreter.prepare_thunk(ModEval, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(hastrackedexpr, src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test supertype(ModEval.StructParent) === AbstractArray
+
+    # Finding all dependencies in a struct definition
+    # Nonparametric
+    ex = :(struct NoParam end)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:NoParam,false), src, edges)  # initially mark only the constructor
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test isa(ModSelective.NoParam(), ModSelective.NoParam)
+    # Parametric
+    ex = quote
+        struct Struct{T} <: StructParent{T,1}
+            x::Vector{T}
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:Struct,false), src, edges)  # initially mark only the constructor
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test isa(ModSelective.Struct([1,2,3]), ModSelective.Struct{Int})
+    # Keyword constructor (this generates :copyast expressions)
+    ex = quote
+        struct KWStruct
+            x::Int
+            y::Float32
+            z::String
+            function KWStruct(; x::Int=1, y::Float32=1.0f0, z::String="hello")
+                return new(x, y, z)
+            end
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges)  # initially mark only the constructor
+    selective_eval_fromstart!(frame, isrequired, true)
+    kws = ModSelective.KWStruct(y=5.0f0)
+    @test kws.y === 5.0f0
+
+    # Anonymous functions
+    ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = fill(false, length(src.code))
+    @assert Meta.isexpr(src.code[end-1], :method, 3)
+    isrequired[end-1] = true
+    lines_required!(isrequired, src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test ModSelective.max_values(Int16) === 65536
+
+    # Avoid redefining types
+    ex = quote
+        struct MyNewType
+            x::Int
+
+            MyNewType(y::Int) = new(y)
+        end
+    end
+    Core.eval(ModEval, ex)
+    frame = JuliaInterpreter.prepare_thunk(ModEval, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; exclude_named_typedefs=true)  # initially mark only the constructor
+    bbs = Core.Compiler.compute_basic_blocks(src.code)
+    for (iblock, block) in enumerate(bbs.blocks)
+        r = LoweredCodeUtils.rng(block)
+        if iblock == length(bbs.blocks)
+            @test any(idx->isrequired[idx], r)
+        else
+            @test !any(idx->isrequired[idx], r)
+        end
+    end
 
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and
@@ -201,6 +317,17 @@ end
         VERSION >= v"1.1" && @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
         VERSION >= v"1.1" && @test count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
         LoweredCodeUtils.print_with_code(io, src, edges)
+        str = String(take!(io))
+        if isdefined(Base.IRShow, :show_ir_stmt)
+            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
+            @test count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+        else
+            @test occursin("No IR statement printer", str)
+        end
+        # Works with Frames too
+        frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+        edges = CodeEdges(frame.framecode.src)
+        LoweredCodeUtils.print_with_code(io, frame, edges)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
             @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
