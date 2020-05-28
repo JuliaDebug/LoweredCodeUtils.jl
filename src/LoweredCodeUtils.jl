@@ -1,5 +1,9 @@
 module LoweredCodeUtils
 
+if isdefined(Base, :Experimental) && isdefined(Base.Experimental, Symbol("@optlevel"))
+    @eval Base.Experimental.@optlevel 1
+end
+
 using Core: SimpleVector, CodeInfo, NewvarNode, GotoNode
 using Base.Meta: isexpr
 using JuliaInterpreter

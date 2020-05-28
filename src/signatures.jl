@@ -41,8 +41,8 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
     mod = moduleof(frame)
     lastpc = frame.pc = pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
-        if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
-            lastpc = pc = define_anonymous(recurse, frame, stmt)
+        if isanonymous_typedef(stmt)
+            lastpc = pc = step_through_methoddef(recurse, frame, stmt)   # define an anonymous function
         elseif isexpr(stmt, :call) && is_quotenode(stmt.args[1], Core.Typeof) &&
                (sym = stmt.args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
             return nothing, pc
@@ -78,25 +78,7 @@ function signature_top(frame, stmt::Expr, pc)
     return minid(stmt.args[2], frame.framecode.src.code, pc)
 end
 
-##
-## Detecting anonymous functions. These start with a :thunk expr and have a characteristic CodeInfo
-##
-function isanonymous_typedef(src::CodeInfo)
-    length(src.code) >= 4 || return false
-    if VERSION >= v"1.5.0-DEV.702"
-        stmt = src.code[end-1]
-        (isexpr(stmt, :call) && is_global_ref(stmt.args[1], Core, :_typebody!)) || return false
-        name = stmt.args[2]::Symbol
-        return startswith(String(name), "#")
-    else
-        stmt = src.code[end-1]
-        isexpr(stmt, :struct_type) || return false
-        name = stmt.args[1]::Symbol
-        return startswith(String(name), "#")
-    end
-end
-
-function define_anonymous(@nospecialize(recurse), frame, @nospecialize(stmt))
+function step_through_methoddef(@nospecialize(recurse), frame, @nospecialize(stmt))
     while !isexpr(stmt, :method)
         pc = step_expr!(recurse, frame, stmt, true)
         stmt = pc_expr(frame, pc)

@@ -22,7 +22,7 @@ function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
     return false, haseval
 end
 
-function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges)
+function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = fill(false, length(src.code))
     for (i, stmt) in enumerate(src.code)
         if !isrequired[i]
@@ -33,7 +33,7 @@ function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges)
         end
     end
     # All tracked expressions are marked. Now add their dependencies.
-    lines_required!(isrequired, src, edges)
+    lines_required!(isrequired, src, edges; kwargs...)
     return isrequired
 end
 
@@ -249,6 +249,29 @@ end
     lines_required!(isrequired, src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.max_values(Int16) === 65536
+
+    # Avoid redefining types
+    ex = quote
+        struct MyNewType
+            x::Int
+
+            MyNewType(y::Int) = new(y)
+        end
+    end
+    Core.eval(ModEval, ex)
+    frame = JuliaInterpreter.prepare_thunk(ModEval, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; exclude_named_typedefs=true)  # initially mark only the constructor
+    bbs = Core.Compiler.compute_basic_blocks(src.code)
+    for (iblock, block) in enumerate(bbs.blocks)
+        r = LoweredCodeUtils.rng(block)
+        if iblock == length(bbs.blocks)
+            @test any(idx->isrequired[idx], r)
+        else
+            @test !any(idx->isrequired[idx], r)
+        end
+    end
 
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and

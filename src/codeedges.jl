@@ -391,12 +391,6 @@ function CodeEdges(src::CodeInfo)
 end
 
 function CodeEdges(src::CodeInfo, cl::CodeLinks)
-    function pushall!(dest, src)
-        for item in src
-            push!(dest, item)
-        end
-        return dest
-    end
     # The main task here is to elide the slot-dependencies and convert
     # everything to just ssas & names.
     # Hence we "follow" slot links to their non-slot leaves.
@@ -560,58 +554,63 @@ will end up skipping a subset of such statements, perhaps while repeating others
 
 See also [`lines_required!`](@ref) and [`selective_eval!`](@ref).
 """
-function lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges)
+function lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
     objs = Set{Union{Symbol,GlobalRef}}([obj])
-    return lines_required!(isrequired, objs, src, edges)
+    return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
-function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges)
+function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
     isrequired[idx] = true
     objs = Set{Union{Symbol,GlobalRef}}()
-    return lines_required!(isrequired, src, edges)
+    return lines_required!(isrequired, src, edges; kwargs...)
 end
 
 """
-    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges)
+    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; exclude_named_typedefs::Bool=false)
 
 Like `lines_required`, but where `isrequired[idx]` has already been set to `true` for all statements
 that you know you need to evaluate. All other statements should be marked `false` at entry.
 On return, the complete set of required statements will be marked `true`.
+
+Use `exclude_named_typedefs=true` if you're extracting method signatures and not evaluating new definitions.
 """
-function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges)
+function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; kwargs...)
     objs = Set{Union{Symbol,GlobalRef}}()
-    return lines_required!(isrequired, objs, src, edges)
+    return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
-function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges)
+function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges; exclude_named_typedefs::Bool=false)
     # Do a traveral of "numbered" predecessors
-    function add_preds!(isrequired, idx, edges::CodeEdges)
+    function add_preds!(isrequired, idx, edges::CodeEdges, norequire)
         changed = false
         preds = edges.preds[idx]
         for p in preds
             isrequired[p] && continue
+            p ∈ norequire && continue
             isrequired[p] = true
             changed = true
-            add_preds!(isrequired, p, edges)
+            add_preds!(isrequired, p, edges, norequire)
         end
         return changed
     end
-    function add_succs!(isrequired, idx, edges::CodeEdges, succs)
+    function add_succs!(isrequired, idx, edges::CodeEdges, succs, norequire)
         changed = false
         for p in succs
             isrequired[p] && continue
+            p ∈ norequire && continue
             isrequired[p] = true
             changed = true
-            add_succs!(isrequired, p, edges, edges.succs[p])
+            add_succs!(isrequired, p, edges, edges.succs[p], norequire)
         end
         return changed
     end
-    function add_obj!(isrequired, objs, obj, edges::CodeEdges)
+    function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
         changed = false
         for d in edges.byname[obj].assigned
-            isrequired[d] || add_preds!(isrequired, d, edges)
+            d ∈ norequire && continue
+            isrequired[d] || add_preds!(isrequired, d, edges, norequire)
             isrequired[d] = true
             changed = true
         end
@@ -619,27 +618,61 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         return changed
     end
 
+    # We'll mostly use generic graph traversal to discover all the lines we need,
+    # but structs are in a bit of a different category (especially on Julia 1.5+).
+    # It's easiest to discover these at the beginning.
+    # Moreover, if we're excluding named type definitions, we'll add them to `norequire`
+    # to prevent them from being marked.
+    typedef_blocks, typedef_names = UnitRange{Int}[], Symbol[]
+    norequire = BitSet()
+    nstmts = length(src.code)
+    i = 1
+    while i <= nstmts
+        stmt = rhs(src.code[i])
+        if istypedef(stmt) && !isanonymous_typedef(stmt)
+            r = typedef_range(src, i)
+            push!(typedef_blocks, r)
+            name = stmt.head === :call ? stmt.args[3] : stmt.args[1]
+            if isa(name, QuoteNode)
+                name = name.value
+            end
+            isa(name, Symbol) || @show src i r stmt
+            push!(typedef_names, name::Symbol)
+            i = last(r)+1
+            if exclude_named_typedefs && !isanonymous_typedef(stmt)
+                pushall!(norequire, r)
+            end
+        else
+            i += 1
+        end
+    end
+
+    # Mark any requested objects (their lines of assignment)
     objsnew = Set{Union{Symbol,GlobalRef}}()
     for obj in objs
-        add_obj!(isrequired, objsnew, obj, edges)
+        add_obj!(isrequired, objsnew, obj, edges, norequire)
     end
     objs = objsnew
+
+    # Compute basic blocks, which we'll use to make sure we mark necessary control-flow
     bbs = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
+    nblocks = length(bbs.blocks)
+
     changed = true
     iter = 0
     while changed
         changed = false
         # Handle ssa predecessors
-        for idx = 1:length(isrequired)
+        for idx = 1:nstmts
             if isrequired[idx]
-                changed |= add_preds!(isrequired, idx, edges)
+                changed |= add_preds!(isrequired, idx, edges, norequire)
             end
         end
         # Handle named dependencies
         for (obj, uses) in edges.byname
             obj ∈ objs && continue
             if any(view(isrequired, uses.succs))
-                changed |= add_obj!(isrequired, objs, obj, edges)
+                changed |= add_obj!(isrequired, objs, obj, edges, norequire)
             end
         end
         # Add control-flow. For any basic block with an evaluated statement inside it,
@@ -648,22 +681,24 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         for (ibb, bb) in enumerate(bbs.blocks)
             r = rng(bb)
             if any(view(isrequired, r))
-                # if !isempty(bb.succs)
-                if ibb != length(bbs.blocks)
+                if ibb != nblocks
                     idxlast = r[end]
+                    idxlast ∈ norequire && continue
                     changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
                 for ibbp in bb.preds
                     rpred = rng(bbs.blocks[ibbp])
                     idxlast = rpred[end]
+                    idxlast ∈ norequire && continue
                     changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
                 for ibbs in bb.succs
-                    ibbs == length(bbs.blocks) && continue
+                    ibbs == nblocks && continue
                     rpred = rng(bbs.blocks[ibbs])
                     idxlast = rpred[end]
+                    idxlast ∈ norequire && continue
                     changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
@@ -674,55 +709,35 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         # statements. If we're evaluating any of them, it's important to evaluate *all* of them.
         for (idx, stmt) in enumerate(src.code)
             isrequired[idx] || continue
-            if isexpr(stmt, :(=))
-                stmt = stmt.args[2]
-            end
-            # Is this a struct definition?
-            if (isa(stmt, Expr) && stmt.head ∈ structheads) ||                            # < Julia 1.5
-               (isexpr(stmt, :call) && callee_matches(stmt.args[1], Core, :_structtype))  # >= Julia 1.5
-                stmt = stmt::Expr
-                name = stmt.args[stmt.head === :call ? 3 : 1]
-                if isa(name, QuoteNode)
-                    name = name.value
-                end
-                name = name::NamedVar
-                # Some lines we need have been marked as successors of this name
-                for d in edges.byname[name].succs
-                    stmt2 = src.code[d]
-                    if isa(stmt2, Expr)
-                        head = stmt2.head
-                        if head === :method || head === :global || head === :const
-                            changed |= !isrequired[d]
-                            isrequired[d] = true
-                        end
-                    end
-                    # Julia 1.5+: others are successor of a slotnum->ssa load
-                    if isslotnum(stmt2)
-                        for s in edges.succs[d]
-                            stmt3 = src.code[s]
-                            if isexpr(stmt3, :call) && (callee_matches(stmt3.args[1], Core, :_setsuper!) ||
-                                                        callee_matches(stmt3.args[1], Core, :_typebody!))
-                                changed |= !isrequired[s]
-                                isrequired[s] = true
+            for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
+                if idx ∈ typedefr
+                    ireq = view(isrequired, typedefr)
+                    if !all(ireq)
+                        changed = true
+                        ireq .= true
+                        # Also mark any by-type constructor(s) associated with this typedef
+                        var = get(edges.byname, typedefn, nothing)
+                        if var !== nothing
+                            for s in var.succs
+                                s ∈ norequire && continue
+                                stmt2 = src.code[s]
+                                if isexpr(stmt2, :method) && (stmt2::Expr).args[1] === false
+                                    isrequired[s] = true
+                                end
                             end
                         end
-                    end
-                    # Julia 1.5+: for non-parametric types, the Core._setsuper! call happens without the slotname->ssa load
-                    if isexpr(stmt2, :call) && callee_matches((stmt2::Expr).args[1], Core, :_setsuper!)
-                        changed |= !isrequired[d]
-                        isrequired[d] = true
                     end
                 end
             end
             # Anonymous functions may not yet include the method definition
-            if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
+            if isanonymous_typedef(stmt)
                 i = idx + 1
                 while i <= length(src.code) && !ismethod3(src.code[i])
                     i += 1
                 end
                 if i <= length(src.code) && src.code[i].args[1] == false
                     tpreds = terminal_preds(i, edges)
-                    if minimum(tpreds) == idx
+                    if minimum(tpreds) == idx && i ∉ norequire
                         changed |= !isrequired[i]
                         isrequired[i] = true
                     end
@@ -732,14 +747,6 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         iter += 1  # just for diagnostics
     end
     return isrequired
-end
-
-function callee_matches(f, mod, sym)
-    is_global_ref(f, mod, sym) && return true
-    if isdefined(mod, sym)
-        is_quotenode(f, getfield(mod, sym)) && return true
-    end
-    return false
 end
 
 """
