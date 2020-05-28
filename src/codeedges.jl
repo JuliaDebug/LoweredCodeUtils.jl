@@ -192,18 +192,34 @@ function namedkeys(cl::CodeLinks)
 end
 
 function direct_links!(cl::CodeLinks, src::CodeInfo)
+    # Utility for when a stmt itself contains a CodeInfo
+    function add_inner!(cl::CodeLinks, icl::CodeLinks, idx)
+        for (name, _) in icl.nameassigns
+            assigns = get(cl.nameassigns, name, nothing)
+            if assigns === nothing
+                cl.nameassigns[name] = assigns = Int[]
+            end
+            push!(assigns, idx)
+        end
+        for (name, _) in icl.namesuccs
+            succs = get(cl.namesuccs, name, nothing)
+            if succs === nothing
+                cl.namesuccs[name] = succs = Links()
+            end
+            push!(succs.ssas, idx)
+        end
+    end
+
     for (i, stmt) in enumerate(src.code)
         if isexpr(stmt, :thunk) && isa(stmt.args[1], CodeInfo)
             icl = CodeLinks(stmt.args[1])
-            for (name, _) in icl.nameassigns
-                assign = get(cl.nameassigns, name, nothing)
-                if assign === nothing
-                    cl.nameassigns[name] = assign = Int[]
-                end
-                push!(assign, i)
-            end
+            add_inner!(cl, icl, i)
             continue
         elseif isa(stmt, Expr) && stmt.head ∈ trackedheads
+            if stmt.head === :method && length(stmt.args) === 3 && isa(stmt.args[3], CodeInfo)
+                icl = CodeLinks(stmt.args[3])
+                add_inner!(cl, icl, i)
+            end
             name = stmt.args[1]
             if isa(name, Symbol)
                 assign = get(cl.nameassigns, name, nothing)
@@ -511,6 +527,27 @@ function postprint_lineedges(io::IO, idx::Int, edges::CodeEdges, bbchanged::Bool
     return nothing
 end
 
+function terminal_preds(i::Int, edges::CodeEdges)
+    function terminal_preds!(s, j, edges, covered)
+        j ∈ covered && return s
+        push!(covered, j)
+        preds = edges.preds[j]
+        if isempty(preds)
+            push!(s, j)
+        else
+            for p in preds
+                terminal_preds!(s, p, edges, covered)
+            end
+        end
+        return s
+    end
+    s, covered = BitSet(), BitSet()
+    push!(covered, i)
+    for p in edges.preds[i]
+        terminal_preds!(s, p, edges, covered)
+    end
+    return s
+end
 
 """
     isrequired = lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges)
@@ -551,87 +588,145 @@ end
 function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges)
     # Do a traveral of "numbered" predecessors
     function add_preds!(isrequired, idx, edges::CodeEdges)
+        changed = false
         preds = edges.preds[idx]
         for p in preds
             isrequired[p] && continue
             isrequired[p] = true
+            changed = true
             add_preds!(isrequired, p, edges)
         end
-        return isrequired
+        return changed
     end
     function add_succs!(isrequired, idx, edges::CodeEdges, succs)
+        changed = false
         for p in succs
             isrequired[p] && continue
             isrequired[p] = true
+            changed = true
             add_succs!(isrequired, p, edges, edges.succs[p])
         end
-        return isrequired
+        return changed
+    end
+    function add_obj!(isrequired, objs, obj, edges::CodeEdges)
+        changed = false
+        for d in edges.byname[obj].assigned
+            isrequired[d] || add_preds!(isrequired, d, edges)
+            isrequired[d] = true
+            changed = true
+        end
+        push!(objs, obj)
+        return changed
     end
 
+    objsnew = Set{Union{Symbol,GlobalRef}}()
+    for obj in objs
+        add_obj!(isrequired, objsnew, obj, edges)
+    end
+    objs = objsnew
     bbs = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
     changed = true
     iter = 0
     while changed
         changed = false
-        # Add "named" object dependencies
-        for obj in objs
-            def = edges.byname[obj].assigned
-            if !all(i->isrequired[i], def)
-                changed = true
-                for d in def
-                    isrequired[d] = true
-                    add_preds!(isrequired, d, edges)
-                    if isexpr(src.code[d], :thunk) && startswith(String(obj), '#')
-                        # For anonymous types, we also want their associated methods
-                        add_succs!(isrequired, d, edges, edges.byname[obj].succs)
-                    end
-                end
-            end
-        end
-        # Add "numbered" dependencies
+        # Handle ssa predecessors
         for idx = 1:length(isrequired)
             if isrequired[idx]
-                preds = edges.preds[idx]
-                if !all(i->isrequired[i], preds)
-                    changed = true
-                    isrequired[preds] .= true
-                end
+                changed |= add_preds!(isrequired, idx, edges)
+            end
+        end
+        # Handle named dependencies
+        for (obj, uses) in edges.byname
+            obj ∈ objs && continue
+            if any(view(isrequired, uses.succs))
+                changed |= add_obj!(isrequired, objs, obj, edges)
             end
         end
         # Add control-flow. For any basic block with an evaluated statement inside it,
         # check to see if the block has any successors, and if so mark that block's exit statement.
         # Likewise, any preceding blocks should have *their* exit statement marked.
-        for (i, bb) in enumerate(bbs.blocks)
+        for (ibb, bb) in enumerate(bbs.blocks)
             r = rng(bb)
             if any(view(isrequired, r))
                 # if !isempty(bb.succs)
-                if i != length(bbs.blocks)
+                if ibb != length(bbs.blocks)
                     idxlast = r[end]
                     changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
-                for ibb in bb.preds
-                    rpred = rng(bbs.blocks[ibb])
+                for ibbp in bb.preds
+                    rpred = rng(bbs.blocks[ibbp])
                     idxlast = rpred[end]
                     changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
-                for ibb in bb.succs
-                    ibb == length(bbs.blocks) && continue
-                    rpred = rng(bbs.blocks[ibb])
+                for ibbs in bb.succs
+                    ibbs == length(bbs.blocks) && continue
+                    rpred = rng(bbs.blocks[ibbs])
                     idxlast = rpred[end]
                     changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
             end
         end
-        # In preparation for the next round, add any new named objects
-        # required by these dependencies
-        for (obj, uses) in edges.byname
-            obj ∈ objs && continue
-            if any(i->isrequired[i], uses.succs)
-                push!(objs, obj)
-                changed = true
+        # So far, everything is generic graph traversal. Now we add some domain-specific information.
+        # New struct definitions, including their constructors, get spread out over many
+        # statements. If we're evaluating any of them, it's important to evaluate *all* of them.
+        for (idx, stmt) in enumerate(src.code)
+            isrequired[idx] || continue
+            if isexpr(stmt, :(=))
+                stmt = stmt.args[2]
+            end
+            # Is this a struct definition?
+            if (isa(stmt, Expr) && stmt.head ∈ structheads) ||                            # < Julia 1.5
+               (isexpr(stmt, :call) && callee_matches(stmt.args[1], Core, :_structtype))  # >= Julia 1.5
+                stmt = stmt::Expr
+                name = stmt.args[stmt.head === :call ? 3 : 1]
+                if isa(name, QuoteNode)
+                    name = name.value
+                end
+                name = name::NamedVar
+                # Some lines we need have been marked as successors of this name
+                for d in edges.byname[name].succs
+                    stmt2 = src.code[d]
+                    if isa(stmt2, Expr)
+                        head = stmt2.head
+                        if head === :method || head === :global || head === :const
+                            changed |= !isrequired[d]
+                            isrequired[d] = true
+                        end
+                    end
+                    # Julia 1.5+: others are successor of a slotnum->ssa load
+                    if isslotnum(stmt2)
+                        for s in edges.succs[d]
+                            stmt3 = src.code[s]
+                            if isexpr(stmt3, :call) && (callee_matches(stmt3.args[1], Core, :_setsuper!) ||
+                                                        callee_matches(stmt3.args[1], Core, :_typebody!))
+                                changed |= !isrequired[s]
+                                isrequired[s] = true
+                            end
+                        end
+                    end
+                    # Julia 1.5+: for non-parametric types, the Core._setsuper! call happens without the slotname->ssa load
+                    if isexpr(stmt2, :call) && callee_matches((stmt2::Expr).args[1], Core, :_setsuper!)
+                        changed |= !isrequired[d]
+                        isrequired[d] = true
+                    end
+                end
+            end
+            # Anonymous functions may not yet include the method definition
+            if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
+                i = idx + 1
+                while i <= length(src.code) && !ismethod3(src.code[i])
+                    i += 1
+                end
+                if i <= length(src.code) && src.code[i].args[1] == false
+                    tpreds = terminal_preds(i, edges)
+                    if minimum(tpreds) == idx
+                        changed |= !isrequired[i]
+                        isrequired[i] = true
+                    end
+                end
             end
         end
         iter += 1  # just for diagnostics
@@ -639,7 +734,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     return isrequired
 end
 
-function caller_matches(f, mod, sym)
+function callee_matches(f, mod, sym)
     is_global_ref(f, mod, sym) && return true
     if isdefined(mod, sym)
         is_quotenode(f, getfield(mod, sym)) && return true

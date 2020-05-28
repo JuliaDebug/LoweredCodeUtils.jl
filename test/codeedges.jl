@@ -1,27 +1,17 @@
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
-using LoweredCodeUtils: caller_matches
+using LoweredCodeUtils: callee_matches
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
-
-# # Utilities for finding statements corresponding to particular calls
-# function callpredicate(@nospecialize(stmt), fsym)
-#     isa(stmt, Expr) || return false
-#     head = stmt.head
-#     if head === :(=)
-#         return callpredicate(stmt.args[2], fsym)
-#     end
-#     return LoweredCodeUtils.iscallto(stmt, fsym)
-# end
 
 function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
     haseval = false
     if isa(stmt, Expr)
         if stmt.head === :call
             f = stmt.args[1]
-            haseval = f === :eval || (caller_matches(f, Base, :getproperty) && is_quotenode(stmt.args[2], :eval))
-            caller_matches(f, Core, :_typebody!) && return true, haseval
-            caller_matches(f, Core, :_setsuper!) && return true, haseval
+            haseval = f === :eval || (callee_matches(f, Base, :getproperty) && is_quotenode(stmt.args[2], :eval))
+            callee_matches(f, Core, :_typebody!) && return true, haseval
+            callee_matches(f, Core, :_setsuper!) && return true, haseval
             f === :include && return true, haseval
         elseif stmt.head === :thunk
             any(s->any(hastrackedexpr(s; heads=heads)), stmt.args[1].code) && return true, haseval
@@ -32,32 +22,19 @@ function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
     return false, haseval
 end
 
-function minimal_evaluation(src::Core.CodeInfo, edges::CodeEdges)
-    musteval = fill(false, length(src.code))
+function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges)
+    isrequired = fill(false, length(src.code))
     for (i, stmt) in enumerate(src.code)
-        if !musteval[i]
-            musteval[i], haseval = hastrackedexpr(stmt)
+        if !isrequired[i]
+            isrequired[i], haseval = predicate(stmt)
             if haseval
-                musteval[edges.succs[i]] .= true
+                isrequired[edges.succs[i]] .= true
             end
         end
     end
     # All tracked expressions are marked. Now add their dependencies.
-    lines_required!(musteval, src, edges)
-    # Struct definitions likely omitted const/global. Look for them via name.
-    for (name, var) in edges.byname
-        if !isempty(var.assigned) && any(i->musteval[i], var.succs)
-            foreach(var.succs) do i
-                stmt = src.code[i]
-                if isa(stmt, Expr)
-                    if stmt.head === :global || stmt.head === :const
-                        musteval[i] = true
-                    end
-                end
-            end
-        end
-    end
-    return musteval
+    lines_required!(isrequired, src, edges)
+    return isrequired
 end
 
 function allmissing(mod::Module, names)
@@ -209,7 +186,7 @@ end
     # Check that the StructParent name is discovered everywhere it is used
     var = edges.byname[:StructParent]
     @test var.preds[end] ∈ var.succs
-    isrequired = minimal_evaluation(src, edges)
+    isrequired = minimal_evaluation(hastrackedexpr, src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModSelective.StructParent) === AbstractArray
     # Also check redefinition (it's OK when the definition doesn't change)
@@ -217,9 +194,31 @@ end
     frame = JuliaInterpreter.prepare_thunk(ModEval, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
-    isrequired = minimal_evaluation(src, edges)
+    isrequired = minimal_evaluation(hastrackedexpr, src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModEval.StructParent) === AbstractArray
+
+    # Finding all dependencies in a struct definition
+    # Nonparametric
+    ex = :(struct NoParam end)
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:NoParam,false), src, edges)  # initially mark only the constructor
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test isa(ModSelective.NoParam(), ModSelective.NoParam)
+    # Parametric
+    ex = quote
+        struct Struct{T} <: StructParent{T,1}
+            x::Vector{T}
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:Struct,false), src, edges)  # initially mark only the constructor
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test isa(ModSelective.Struct([1,2,3]), ModSelective.Struct{Int})
 
     # Anonymous functions
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))
