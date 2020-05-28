@@ -284,7 +284,7 @@ function add_links!(target::Pair{<:Any,Links}, @nospecialize(stmt), cl::CodeLink
             cl.namesuccs[stmt] = namestore = Links()
         end
         push!(namestore, targetid)
-    elseif isa(stmt, Expr)
+    elseif isa(stmt, Expr) && stmt.head !== :copyast
         arng = 1:length(stmt.args)
         if stmt.head === :call
             f = stmt.args[1]

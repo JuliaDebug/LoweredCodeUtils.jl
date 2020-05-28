@@ -219,6 +219,24 @@ end
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:Struct,false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     @test isa(ModSelective.Struct([1,2,3]), ModSelective.Struct{Int})
+    # Keyword constructor (this generates :copyast expressions)
+    ex = quote
+        struct KWStruct
+            x::Int
+            y::Float32
+            z::String
+            function KWStruct(; x::Int=1, y::Float32=1.0f0, z::String="hello")
+                return new(x, y, z)
+            end
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges)  # initially mark only the constructor
+    selective_eval_fromstart!(frame, isrequired, true)
+    kws = ModSelective.KWStruct(y=5.0f0)
+    @test kws.y === 5.0f0
 
     # Anonymous functions
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))
