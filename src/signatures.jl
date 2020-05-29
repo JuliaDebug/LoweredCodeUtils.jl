@@ -245,7 +245,11 @@ function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos,
     replacements = Dict{Symbol,Symbol}()
     for (callee, caller) in calledby
         (!startswith(String(callee), '#') || haskey(replacements, callee)) && continue
-        set_to_running_name!(recurse, replacements, frame, methodinfos, calledby, callee, caller)
+        try
+            set_to_running_name!(recurse, replacements, frame, methodinfos, calledby, callee, caller)
+        catch err
+            @warn "skipping callee $callee (called by $caller) due to $err"
+        end
     end
     for (linetop, linebody, callee, caller) in selfcalls
         cname = get(replacements, callee, nothing)

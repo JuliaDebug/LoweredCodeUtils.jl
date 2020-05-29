@@ -348,4 +348,22 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     rename_framemethods!(frame)
     pc = methoddefs!(signatures, frame; define=false)
     @test typeof(Lowering422.fneg) ∈ Set(Base.unwrap_unionall(sig).parameters[1] for sig in signatures)
+
+    # Undefined names
+    # This comes from FileWatching; WindowsRawSocket is only defined on Windows
+    ex = quote
+        if Sys.iswindows()
+            using Base: WindowsRawSocket
+            function wait(socket::WindowsRawSocket; readable=false, writable=false)
+                fdw = _FDWatcher(socket, readable, writable)
+                try
+                    return wait(fdw, readable=readable, writable=writable)
+                finally
+                    close(fdw, readable, writable)
+                end
+            end
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    rename_framemethods!(frame)
 end
