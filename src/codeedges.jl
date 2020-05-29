@@ -210,6 +210,8 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
         end
     end
 
+    P = Pair{Union{SSAValue,SlotNumber,NamedVar},Links}
+
     for (i, stmt) in enumerate(src.code)
         if isexpr(stmt, :thunk) && isa(stmt.args[1], CodeInfo)
             icl = CodeLinks(stmt.args[1])
@@ -231,11 +233,11 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                 if targetstore === nothing
                     cl.namepreds[name] = targetstore = Links()
                 end
-                target = name=>targetstore
+                target = P(name, targetstore)
                 add_links!(target, stmt, cl)
             end
             rhs = stmt
-            target = SSAValue(i)=>cl.ssapreds[i]
+            target = P(SSAValue(i), cl.ssapreds[i])
         elseif isexpr(stmt, :(=))
             # An assignment
             stmt = stmt::Expr
@@ -243,14 +245,14 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             if isslotnum(lhs)
                 lhs = lhs::AnySlotNumber
                 id = lhs.id
-                target = SlotNumber(id)=>cl.slotpreds[id]
+                target = P(SlotNumber(id), cl.slotpreds[id])
                 push!(cl.slotassigns[id], i)
             elseif isa(lhs, NamedVar)
                 targetstore = get(cl.namepreds, lhs, nothing)
                 if targetstore === nothing
                     cl.namepreds[lhs] = targetstore = Links()
                 end
-                target = lhs=>targetstore
+                target = P(lhs, targetstore)
                 assign = get(cl.nameassigns, lhs, nothing)
                 if assign === nothing
                     cl.nameassigns[lhs] = assign = Int[]
@@ -261,23 +263,26 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             end
         else
             rhs = stmt
-            target = SSAValue(i)=>cl.ssapreds[i]
+            target = P(SSAValue(i), cl.ssapreds[i])
         end
         add_links!(target, rhs, cl)
     end
     return cl
 end
 
-function add_links!(target::Pair{<:Any,Links}, @nospecialize(stmt), cl::CodeLinks)
-    targetid, targetstore = target
+function add_links!(target::Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, @nospecialize(stmt), cl::CodeLinks)
+    _targetid, targetstore = target
+    targetid = _targetid::Union{SSAValue,SlotNumber,NamedVar}
     # Adds bidirectional edges
     if isssa(stmt)
-        push!(targetstore, stmt)                 # forward edge
+        stmt = stmt::AnySSAValue
+        push!(targetstore, SSAValue(stmt.id))    # forward edge
         push!(cl.ssasuccs[stmt.id], targetid)    # backward edge
     elseif isslotnum(stmt)
-        push!(targetstore, stmt)
+        stmt = stmt::AnySlotNumber
+        push!(targetstore, SlotNumber(stmt.id))
         push!(cl.slotsuccs[stmt.id], targetid)
-    elseif isa(stmt, NamedVar)
+    elseif isa(stmt, Symbol) || isa(stmt, GlobalRef)   # NamedVar
         push!(targetstore, stmt)
         namestore = get(cl.namesuccs, stmt, nothing)
         if namestore === nothing
@@ -285,6 +290,7 @@ function add_links!(target::Pair{<:Any,Links}, @nospecialize(stmt), cl::CodeLink
         end
         push!(namestore, targetid)
     elseif isa(stmt, Expr) && stmt.head !== :copyast
+        stmt = stmt::Expr
         arng = 1:length(stmt.args)
         if stmt.head === :call
             f = stmt.args[1]
@@ -303,14 +309,14 @@ function add_links!(target::Pair{<:Any,Links}, @nospecialize(stmt), cl::CodeLink
 end
 
 function Base.push!(l::Links, id)
-    if isssa(id)
+    if isa(id, SSAValue)
         k = id.id
         k ∉ l.ssas && push!(l.ssas, k)
-    elseif isslotnum(id)
+    elseif isa(id, SlotNumber)
         k = id.id
         k ∉ l.slots && push!(l.slots, k)
     else
-        # NamedVar
+        id = id::NamedVar
         id ∉ l.names && push!(l.names, id)
     end
     return id
@@ -393,17 +399,6 @@ end
 function CodeEdges(src::CodeInfo, cl::CodeLinks)
     # The main task here is to elide the slot-dependencies and convert
     # everything to just ssas & names.
-    # Hence we "follow" slot links to their non-slot leaves.
-    function follow_links!(marked, l::Links, slotlinks, slotassigns, slothandled)
-        pushall!(marked, l.ssas)
-        for id in l.slots
-            slothandled[id] && continue
-            slothandled[id] = true
-            pushall!(marked, slotassigns[id])
-            follow_links!(marked, slotlinks[id], slotlinks, slotassigns, slothandled)
-        end
-        return marked
-    end
 
     # Replace/add named intermediates (slot & named-variable references) with statement numbers
     nstmts, nslots = length(src.code), length(src.slotnames)
@@ -482,6 +477,18 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     end
 
     return edges
+end
+
+# Follow slot links to their non-slot leaves
+function follow_links!(marked, l::Links, slotlinks, slotassigns, slothandled)
+    pushall!(marked, l.ssas)
+    for id in l.slots
+        slothandled[id] && continue
+        slothandled[id] = true
+        pushall!(marked, slotassigns[id])
+        follow_links!(marked, slotlinks[id], slotlinks, slotassigns, slothandled)
+    end
+    return marked
 end
 
 """
