@@ -13,7 +13,8 @@ function iscallto(@nospecialize(stmt), name)
     if isexpr(stmt, :call)
         a = stmt.args[1]
         a === name && return true
-        return is_global_ref(a, Core, :_apply) && stmt.args[2] === name
+        is_global_ref(a, Core, :_apply) && stmt.args[2] === name && return true
+        is_global_ref(a, Core, :_apply_iterate) && stmt.args[3] === name && return true
     end
     return false
 end
@@ -27,6 +28,7 @@ function getcallee(@nospecialize(stmt))
     if isexpr(stmt, :call)
         a = stmt.args[1]
         is_global_ref(a, Core, :_apply) && return stmt.args[2]
+        is_global_ref(a, Core, :_apply_iterate) && return stmt.args[3]
         return a
     end
     error(stmt, " is not a call expression")

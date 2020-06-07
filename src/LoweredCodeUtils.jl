@@ -47,6 +47,9 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     @assert precompile(CodeEdges, (CodeInfo,))
     @assert precompile(add_links!, (Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, Any, CodeLinks))
     @assert precompile(lines_required!, (Vector{Bool}, Set{NamedVar}, CodeInfo, CodeEdges))
+
+    precompile(Tuple{typeof(setindex!),Dict{Union{GlobalRef, Symbol},Links},Links,Symbol})
+    precompile(Tuple{typeof(setindex!),Dict{Union{GlobalRef, Symbol},Variable},Variable,Symbol})
 end
 
 end # module

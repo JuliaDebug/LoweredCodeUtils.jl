@@ -164,6 +164,16 @@ function identify_framemethod_calls(frame)
                         if isa(mkey, Symbol)
                             # Could be a GlobalRef but then it's outside frame
                             haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                        elseif is_global_ref(mkey, Core, isdefined(Core, :_apply_iterate) ? :_apply_iterate : :_apply)
+                            ssaref = mstmt.args[end-1]
+                            if isa(ssaref, JuliaInterpreter.SSAValue)
+                                id = ssaref.id
+                                has_self_call(msrc, msrc.code[id]) || continue
+                            end
+                            mkey = mstmt.args[end-2]
+                            if isa(mkey, Symbol)
+                                haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                            end
                         end
                     elseif isexpr(mstmt, :meta) && mstmt.args[1] == :generated
                         newex = mstmt.args[2]
@@ -529,6 +539,15 @@ function is_self_call(@nospecialize(stmt), slotnames, argno=1)
     return false
 end
 
+function has_self_call(src, stmt::Expr)
+    # Check that it has a #self# call
+    hasself = false
+    for i = 2:length(stmt.args)
+        hasself |= is_self_call(stmt, src.slotnames, i)
+    end
+    return hasself
+end
+
 """
     mbody = bodymethod(m::Method)
 
@@ -556,12 +575,16 @@ function bodymethod(mkw::Method)
     length(src.code) > 1 || return m
     stmt = src.code[end-1]
     if isexpr(stmt, :call) && (f = stmt.args[1]; isa(f, QuoteNode))
-        # Check that it has a #self# call
-        hasself = false
-        for i = 2:length(stmt.args)
-            hasself |= is_self_call(stmt, src.slotnames, i)
+        if f.value === (isdefined(Core, :_apply_iterate) ? Core._apply_iterate : Core._apply)
+            ssaref = stmt.args[end-1]
+            if isa(ssaref, JuliaInterpreter.SSAValue)
+                id = ssaref.id
+                has_self_call(src, src.code[id]) || return m
+            end
+            f = stmt.args[end-2]
+        else
+            has_self_call(src, stmt) || return m
         end
-        hasself || return m
         f = f.value
         mths = methods(f)
         if length(mths) == 1
@@ -570,4 +593,3 @@ function bodymethod(mkw::Method)
     end
     return m
 end
-
