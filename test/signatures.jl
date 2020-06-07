@@ -260,6 +260,26 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     # Issue in https://github.com/timholy/CodeTracking.jl/pull/48
     mbody = bodymethod(m)
     @test mbody != m && mbody.file != :none
+    # varargs keyword methods
+    m = which(Base.print_shell_escaped, (IO, AbstractString))
+    mbody = bodymethod(m)
+    @test isa(mbody, Method) && mbody != m
+
+    ex = quote
+        function print_shell_escaped(io::IO, cmd::AbstractString, args::AbstractString...;
+                                     special::AbstractString="")
+            print_shell_word(io, cmd, special)
+            for arg in args
+                print(io, ' ')
+                print_shell_word(io, arg, special)
+            end
+        end
+    end
+    frame = JuliaInterpreter.prepare_thunk(Base, ex)
+    rename_framemethods!(frame)
+    empty!(signatures)
+    methoddefs!(signatures, frame; define=false)
+    @test length(signatures) >= 3
 
     ex = :(typedsig(x) = 1)
     frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
