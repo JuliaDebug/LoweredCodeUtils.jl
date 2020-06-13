@@ -590,41 +590,6 @@ end
 
 function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges; exclude_named_typedefs::Bool=false)
     # Do a traveral of "numbered" predecessors
-    function add_preds!(isrequired, idx, edges::CodeEdges, norequire)
-        changed = false
-        preds = edges.preds[idx]
-        for p in preds
-            isrequired[p] && continue
-            p ∈ norequire && continue
-            isrequired[p] = true
-            changed = true
-            add_preds!(isrequired, p, edges, norequire)
-        end
-        return changed
-    end
-    function add_succs!(isrequired, idx, edges::CodeEdges, succs, norequire)
-        changed = false
-        for p in succs
-            isrequired[p] && continue
-            p ∈ norequire && continue
-            isrequired[p] = true
-            changed = true
-            add_succs!(isrequired, p, edges, edges.succs[p], norequire)
-        end
-        return changed
-    end
-    function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
-        changed = false
-        for d in edges.byname[obj].assigned
-            d ∈ norequire && continue
-            isrequired[d] || add_preds!(isrequired, d, edges, norequire)
-            isrequired[d] = true
-            changed = true
-        end
-        push!(objs, obj)
-        return changed
-    end
-
     # We'll mostly use generic graph traversal to discover all the lines we need,
     # but structs are in a bit of a different category (especially on Julia 1.5+).
     # It's easiest to discover these at the beginning.
@@ -636,7 +601,8 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     i = 1
     while i <= nstmts
         stmt = rhs(src.code[i])
-        if istypedef(stmt) && !isanonymous_typedef(stmt)
+        if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
+            stmt = stmt::Expr
             r = typedef_range(src, i)
             push!(typedef_blocks, r)
             name = stmt.head === :call ? stmt.args[3] : stmt.args[1]
@@ -665,7 +631,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     bbs = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
     nblocks = length(bbs.blocks)
 
-    changed = true
+    changed::Bool = true
     iter = 0
     while changed
         changed = false
@@ -742,7 +708,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                 while i <= length(src.code) && !ismethod3(src.code[i])
                     i += 1
                 end
-                if i <= length(src.code) && src.code[i].args[1] == false
+                if i <= length(src.code) && (src.code[i]::Expr).args[1] == false
                     tpreds = terminal_preds(i, edges)
                     if minimum(tpreds) == idx && i ∉ norequire
                         changed |= !isrequired[i]
@@ -754,6 +720,41 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         iter += 1  # just for diagnostics
     end
     return isrequired
+end
+
+function add_preds!(isrequired, idx, edges::CodeEdges, norequire)
+    chngd = false
+    preds = edges.preds[idx]
+    for p in preds
+        isrequired[p] && continue
+        p ∈ norequire && continue
+        isrequired[p] = true
+        chngd = true
+        add_preds!(isrequired, p, edges, norequire)
+    end
+    return chngd
+end
+function add_succs!(isrequired, idx, edges::CodeEdges, succs, norequire)
+    chngd = false
+    for p in succs
+        isrequired[p] && continue
+        p ∈ norequire && continue
+        isrequired[p] = true
+        chngd = true
+        add_succs!(isrequired, p, edges, edges.succs[p], norequire)
+    end
+    return chngd
+end
+function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
+    chngd = false
+    for d in edges.byname[obj].assigned
+        d ∈ norequire && continue
+        isrequired[d] || add_preds!(isrequired, d, edges, norequire)
+        isrequired[d] = true
+        chngd = true
+    end
+    push!(objs, obj)
+    return chngd
 end
 
 """

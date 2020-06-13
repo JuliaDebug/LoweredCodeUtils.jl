@@ -15,12 +15,12 @@ For `f(x::AbstractArray{T}) where T`, the corresponding `sigsv` is constructed a
     sig = signature(sigsv)
 """
 function signature(sigsv::SimpleVector)
-    sigp, sigtv = sigsv
+    sigp::SimpleVector, sigtv::SimpleVector = sigsv
     sig = Tuple{sigp...}
     for i = length(sigtv):-1:1
         sig = UnionAll(sigtv[i], sig)
     end
-    return sig
+    return sig::Union{DataType,UnionAll}
 end
 
 """
@@ -43,8 +43,8 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
         if isanonymous_typedef(stmt)
             lastpc = pc = step_through_methoddef(recurse, frame, stmt)   # define an anonymous function
-        elseif isexpr(stmt, :call) && is_quotenode(stmt.args[1], Core.Typeof) &&
-               (sym = stmt.args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
+        elseif isexpr(stmt, :call) && (q = (stmt::Expr).args[1]; isa(q, QuoteNode) && q.value === Core.Typeof) &&
+               (sym = (stmt::Expr).args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
             return nothing, pc
         else
             lastpc = pc
@@ -53,6 +53,7 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
         end
         stmt = pc_expr(frame, pc)
     end
+    isa(stmt, Expr) || return nothing, pc
     sigsv = @lookup(frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
     return sigt, lastpc
@@ -105,6 +106,13 @@ mutable struct MethodInfo
 end
 MethodInfo(start) = MethodInfo(start, -1, Int[])
 
+struct SelfCall
+    linetop::Int
+    linebody::Int
+    callee::Symbol
+    caller::Union{Symbol,Bool}
+end
+
 """
     methodinfos, selfcalls = identify_framemethod_calls(frame)
 
@@ -122,21 +130,26 @@ which will correspond to a 3-argument `:method` expression containing a `CodeInf
 function identify_framemethod_calls(frame)
     refs = Pair{Symbol,Int}[]
     methodinfos = Dict{Symbol,MethodInfo}()
-    selfcalls = NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Symbol,Bool}}}[]
+    selfcalls = SelfCall[]
     for (i, stmt) in enumerate(frame.framecode.src.code)
-        if isexpr(stmt, :global, 1)
-            key = stmt.args[1]
+        isa(stmt, Expr) || continue
+        if stmt.head === :global && length(stmt.args) == 1
+            key = stmt.args[1]::Symbol
             # We don't know for sure if this is a reference to a method, but let's
             # tentatively cue it
             push!(refs, key=>i)
-        elseif isexpr(stmt, :thunk, 1) && stmt.args[1] isa CodeInfo
+        elseif stmt.head === :thunk && stmt.args[1] isa CodeInfo
             tsrc = stmt.args[1]::CodeInfo
             if length(tsrc.code) == 1
                 tstmt = tsrc.code[1]
-                if isexpr(tstmt, :return, 1)
-                    tex = tstmt.args[1]
-                    if isexpr(tex, :method)
-                        push!(refs, tex.args[1]=>i)
+                if isa(tstmt, Expr)
+                    if tstmt.head === :return && length(tstmt.args) == 1
+                        tex = tstmt.args[1]
+                        if isa(tex, Expr)
+                            if tex.head === :method && (methname = tex.args[1]; isa(methname, Symbol))
+                                push!(refs, methname=>i)
+                            end
+                        end
                     end
                 end
             end
@@ -158,12 +171,14 @@ function identify_framemethod_calls(frame)
             end
             msrc = stmt.args[3]
             if msrc isa CodeInfo
+                key = key::Union{Symbol,Bool}
                 for (j, mstmt) in enumerate(msrc.code)
-                    if isexpr(mstmt, :call)
+                    isa(mstmt, Expr) || continue
+                    if mstmt.head === :call
                         mkey = mstmt.args[1]
                         if isa(mkey, Symbol)
                             # Could be a GlobalRef but then it's outside frame
-                            haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                            haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, j, mkey, key))
                         elseif is_global_ref(mkey, Core, isdefined(Core, :_apply_iterate) ? :_apply_iterate : :_apply)
                             ssaref = mstmt.args[end-1]
                             if isa(ssaref, JuliaInterpreter.SSAValue)
@@ -172,14 +187,16 @@ function identify_framemethod_calls(frame)
                             end
                             mkey = mstmt.args[end-2]
                             if isa(mkey, Symbol)
-                                haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                                haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, j, mkey, key))
                             end
                         end
-                    elseif isexpr(mstmt, :meta) && mstmt.args[1] == :generated
+                    elseif mstmt.head === :meta && mstmt.args[1] === :generated
                         newex = mstmt.args[2]
-                        if isexpr(newex, :new) && length(newex.args) >= 2 && is_global_ref(newex.args[1], Core, :GeneratedFunctionStub)
-                            mkey = newex.args[2]::Symbol
-                            haskey(methodinfos, mkey) && push!(selfcalls, (linetop=i, linebody=j, callee=mkey, caller=key))
+                        if isa(newex, Expr)
+                            if newex.head === :new && length(newex.args) >= 2 && is_global_ref(newex.args[1], Core, :GeneratedFunctionStub)
+                                mkey = newex.args[2]::Symbol
+                                haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, j, mkey, key))
+                            end
                         end
                     end
                 end
@@ -261,7 +278,8 @@ function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos,
             @warn "skipping callee $callee (called by $caller) due to $err"
         end
     end
-    for (linetop, linebody, callee, caller) in selfcalls
+    for sc in selfcalls
+        linetop, linebody, callee, caller = sc.linetop, sc.linebody, sc.callee, sc.caller
         cname = get(replacements, callee, nothing)
         if cname !== nothing && cname !== callee
             replacename!((src.code[linetop].args[3])::CodeInfo, callee=>cname)
@@ -315,7 +333,7 @@ function find_corrected_name(@nospecialize(recurse), frame, pc, name, parentname
         if stmt.args[1] !== name && isa(body, CodeInfo)
             # This might be the GeneratedFunctionStub for a @generated method
             for (i, bodystmt) in enumerate(body.code)
-                if isexpr(bodystmt, :meta) && bodystmt.args[1] === :generated
+                if isexpr(bodystmt, :meta) && (bodystmt::Expr).args[1] === :generated
                     return signature_top(frame, stmt, pc), true
                 end
                 i >= 5 && break  # we should find this early
@@ -351,11 +369,11 @@ function replacename!(args::Vector{Any}, pr)
             replacename!(a, pr)
         elseif isa(a, CodeInfo)
             replacename!(a.code, pr)
-        elseif isa(a, QuoteNode) && a.value == oldname
+        elseif isa(a, QuoteNode) && a.value === oldname
             args[i] = QuoteNode(newname)
         elseif isa(a, Vector{Any})
             replacename!(a, pr)
-        elseif a == oldname
+        elseif a === oldname
             args[i] = newname
         end
     end
@@ -448,7 +466,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
             code = framecode.src
             codeloc = codelocation(code, pc)
-            loc = code.linetable[codeloc]
+            loc = linetable(code, codeloc)
             ft = Base.unwrap_unionall(Base.unwrap_unionall(sigt).parameters[1])
             if !startswith(String(ft.name.name), "##")
                 @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
@@ -472,7 +490,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             stmt = pc_expr(frame, pc)
         end
         pc3 = pc
-        name3 = stmt.args[1]
+        name3 = (stmt::Expr).args[1]
         sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.

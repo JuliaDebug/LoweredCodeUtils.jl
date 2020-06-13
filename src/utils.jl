@@ -10,11 +10,13 @@ isslotnum(stmt) = isa(stmt, Core.Compiler.SlotNumber) | isa(stmt, JuliaInterpret
 Returns `true` is `stmt` is a call expression to `name`.
 """
 function iscallto(@nospecialize(stmt), name)
-    if isexpr(stmt, :call)
-        a = stmt.args[1]
-        a === name && return true
-        is_global_ref(a, Core, :_apply) && stmt.args[2] === name && return true
-        is_global_ref(a, Core, :_apply_iterate) && stmt.args[3] === name && return true
+    if isa(stmt, Expr)
+        if stmt.head === :call
+            a = stmt.args[1]
+            a === name && return true
+            is_global_ref(a, Core, :_apply) && stmt.args[2] === name && return true
+            is_global_ref(a, Core, :_apply_iterate) && stmt.args[3] === name && return true
+        end
     end
     return false
 end
@@ -25,25 +27,27 @@ end
 Returns the function (or Symbol) being called in a :call expression.
 """
 function getcallee(@nospecialize(stmt))
-    if isexpr(stmt, :call)
-        a = stmt.args[1]
-        is_global_ref(a, Core, :_apply) && return stmt.args[2]
-        is_global_ref(a, Core, :_apply_iterate) && return stmt.args[3]
-        return a
+    if isa(stmt, Expr)
+        if stmt.head === :call
+            a = stmt.args[1]
+            is_global_ref(a, Core, :_apply) && return stmt.args[2]
+            is_global_ref(a, Core, :_apply_iterate) && return stmt.args[3]
+            return a
+        end
     end
     error(stmt, " is not a call expression")
 end
 
 function callee_matches(f, mod, sym)
     is_global_ref(f, mod, sym) && return true
-    if isdefined(mod, sym)
-        is_quotenode(f, getfield(mod, sym)) && return true  # a consequence of JuliaInterpreter.optimize!
+    if isdefined(mod, sym) && isa(f, QuoteNode)
+        f.value === getfield(mod, sym) && return true  # a consequence of JuliaInterpreter.optimize!
     end
     return false
 end
 
 function rhs(stmt)
-    isexpr(stmt, :(=)) && return stmt.args[2]
+    isexpr(stmt, :(=)) && return (stmt::Expr).args[2]
     return stmt
 end
 
@@ -66,12 +70,12 @@ function isanonymous_typedef(stmt)
         if VERSION >= v"1.5.0-DEV.702"
             stmt = src.code[end-1]
             (isexpr(stmt, :call) && is_global_ref(stmt.args[1], Core, :_typebody!)) || return false
-            name = stmt.args[2]::Symbol
+            name = (stmt::Expr).args[2]::Symbol
             return startswith(String(name), "#")
         else
             stmt = src.code[end-1]
             isexpr(stmt, :struct_type) || return false
-            name = stmt.args[1]::Symbol
+            name = (stmt::Expr).args[1]::Symbol
             return startswith(String(name), "#")
         end
     end
@@ -79,23 +83,23 @@ function isanonymous_typedef(stmt)
 end
 
 function istypedef(stmt)
-    if isa(stmt, Expr)
-        stmt = rhs(stmt)
-        if isa(stmt, Expr)
-            stmt.head ∈ structheads && return true
-            @static if isdefined(Core, :_structtype)
-                if stmt.head === :call
-                    f = stmt.args[1]
-                    if is_global_ref(f, Core, :_structype)     || is_quotenode(f, Core._structtype) ||
-                        is_global_ref(f, Core, :_abstracttype)  || is_quotenode(f, Core._abstracttype) ||
-                        is_global_ref(f, Core, :_primitivetype) || is_quotenode(f, Core._primitivetype)
-                        return true
-                    end
-                end
+    isa(stmt, Expr) || return false
+    stmt = rhs(stmt)
+    isa(stmt, Expr) || return false
+    stmt.head ∈ structheads && return true
+    @static if isdefined(Core, :_structtype)
+        if stmt.head === :call
+            f = stmt.args[1]
+            if isa(f, GlobalRef)
+                f.mod === Core && f.name ∈ (:_structype, :_abstracttype, :_primitivetype) && return true
             end
-            isanonymous_typedef(stmt) && return true
+            if isa(f, QuoteNode)
+                (f.value === Core._structtype || f.value === Core._abstracttype ||
+                 f.value === Core._primitivetype) && return true
+            end
         end
     end
+    isanonymous_typedef(stmt) && return true
     return false
 end
 
