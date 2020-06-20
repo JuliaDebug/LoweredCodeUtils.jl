@@ -304,6 +304,10 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, @no
         end
     elseif isa(stmt, QuoteNode)
         add_links!(target, stmt.value, cl)
+    elseif is_GotoIfNot(stmt)
+        add_links!(target, (stmt::Core.GotoIfNot).cond, cl)
+    elseif is_ReturnNode(stmt)
+        add_links!(target, (stmt::Core.ReturnNode).val, cl)
     end
     return nothing
 end
@@ -787,7 +791,7 @@ function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::Abstr
     pcexec = pcexec === nothing ? pclast : pcexec
     frame.pc = pcexec
     node = pc_expr(frame)
-    isexpr(node, :return) && return @lookup(frame, (node::Expr).args[1])
+    is_return(node) && return lookup_return(frame, node)
     isassigned(frame.framedata.ssavalues, pcexec) && return frame.framedata.ssavalues[pcexec]
     return nothing
 end

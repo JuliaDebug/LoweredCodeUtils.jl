@@ -122,6 +122,7 @@ function typedef_range(src::CodeInfo, idx)
         if isa(stmt, Expr)
             (stmt.head === :global || stmt.head === :return) && break
         end
+        is_return(stmt) && break
         iend += 1
     end
     iend <= n || (@show src; error("no final :global found"))

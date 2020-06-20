@@ -142,13 +142,11 @@ function identify_framemethod_calls(frame)
             tsrc = stmt.args[1]::CodeInfo
             if length(tsrc.code) == 1
                 tstmt = tsrc.code[1]
-                if isa(tstmt, Expr)
-                    if tstmt.head === :return && length(tstmt.args) == 1
-                        tex = tstmt.args[1]
-                        if isa(tex, Expr)
-                            if tex.head === :method && (methname = tex.args[1]; isa(methname, Symbol))
-                                push!(refs, methname=>i)
-                            end
+                if is_return(tstmt)
+                    tex = isa(tstmt, Expr) ? tstmt.args[1] : tstmt.val
+                    if isa(tex, Expr)
+                        if tex.head === :method && (methname = tex.args[1]; isa(methname, Symbol))
+                            push!(refs, methname=>i)
                         end
                     end
                 end
