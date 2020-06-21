@@ -5,7 +5,8 @@ using Base.Meta: isexpr
 using JuliaInterpreter
 using JuliaInterpreter: SSAValue, SlotNumber, Frame
 using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, whichtt,
-                        next_until!, finish_and_return!, nstatements, codelocation
+                        next_until!, finish_and_return!, nstatements, codelocation,
+                        is_return, lookup_return, is_GotoIfNot, is_ReturnNode
 
 export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod
 
@@ -240,8 +241,8 @@ function identify_framemethod_calls(frame)
             tsrc = stmt.args[1]::CodeInfo
             if length(tsrc.code) == 1
                 tstmt = tsrc.code[1]
-                if isexpr(tstmt, :return, 1)
-                    tex = tstmt.args[1]
+                if is_return(tstmt)
+                    tex = isa(tstmt, Expr) ? tstmt.args[1] : tstmt.val
                     if isexpr(tex, :method)
                         push!(refs, tex.args[1]=>i)
                     end
