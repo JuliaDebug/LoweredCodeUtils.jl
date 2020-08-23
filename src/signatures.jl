@@ -465,7 +465,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             code = framecode.src
             codeloc = codelocation(code, pc)
             loc = linetable(code, codeloc)
-            ft = Base.unwrap_unionall(Base.unwrap_unionall(sigt).parameters[1])
+            ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
             if !startswith(String(ft.name.name), "##")
                 @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
             end
@@ -488,7 +488,8 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             stmt = pc_expr(frame, pc)
         end
         pc3 = pc
-        name3 = (stmt::Expr).args[1]
+        stmt = stmt::Expr
+        name3 = stmt.args[1]
         sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
