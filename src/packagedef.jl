@@ -124,10 +124,10 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
     mod = moduleof(frame)
     lastpc = frame.pc = pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
-        if isexpr(stmt, :thunk) && isanonymous_typedef(stmt.args[1])
+        if isexpr(stmt, :thunk) && isanonymous_typedef((stmt::Expr).args[1])
             lastpc = pc = define_anonymous(recurse, frame, stmt)
-        elseif isexpr(stmt, :call) && JuliaInterpreter.is_quotenode(stmt.args[1], Core.Typeof) &&
-               (sym = stmt.args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
+        elseif isexpr(stmt, :call) && JuliaInterpreter.is_quotenode((stmt::Expr).args[1], Core.Typeof) &&
+               (sym = (stmt::Expr).args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
             return nothing, pc
         else
             lastpc = pc
@@ -136,7 +136,7 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
         end
         stmt = pc_expr(frame, pc)
     end
-    sigsv = @lookup(frame, stmt.args[2])::SimpleVector
+    sigsv = @lookup(frame, (stmt::Expr).args[2])::SimpleVector
     sigt = signature(sigsv)
     return sigt, lastpc
 end
@@ -535,8 +535,8 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
             code = framecode.src
             codeloc = codelocation(code, pc)
-            loc = code.linetable[codeloc]
-            ft = Base.unwrap_unionall(Base.unwrap_unionall(sigt).parameters[1])
+            loc = linetable(code, codeloc)
+            ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
             if !startswith(String(ft.name.name), "##")
                 @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
             end
@@ -558,6 +558,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             pc === nothing && return nothing   # this was just `function foo end`, signal "no def"
             stmt = pc_expr(frame, pc)
         end
+        stmt = stmt::Expr
         pc3 = pc
         name3 = stmt.args[1]
         sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
