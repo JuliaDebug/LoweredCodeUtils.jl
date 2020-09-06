@@ -576,7 +576,7 @@ function bodymethod(mkw::Method)
     local src
     while true
         framecode = JuliaInterpreter.get_framecode(m)
-        fakeargs = Any[nothing for i = 1:framecode.scope.nargs]
+        fakeargs = Any[nothing for i = 1:(framecode.scope::Method).nargs]
         frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
         src = framecode.src
         (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
@@ -585,13 +585,13 @@ function bodymethod(mkw::Method)
         while pc < length(src.code) - 1
             pc = step_expr!(frame)
         end
-        val = pc > 1 ? frame.framedata.ssavalues[pc-1] : src.code[1].args[end]
-        sig = Tuple{Base.unwrap_unionall(m.sig).parameters..., typeof(val)}
+        val = pc > 1 ? frame.framedata.ssavalues[pc-1] : (src.code[1]::Expr).args[end]
+        sig = Tuple{(Base.unwrap_unionall(m.sig)::DataType).parameters..., typeof(val)}
         m = whichtt(sig)
     end
     length(src.code) > 1 || return m
     stmt = src.code[end-1]
-    if isexpr(stmt, :call) && (f = stmt.args[1]; isa(f, QuoteNode))
+    if isexpr(stmt, :call) && (f = (stmt::Expr).args[1]; isa(f, QuoteNode))
         if f.value === (isdefined(Core, :_apply_iterate) ? Core._apply_iterate : Core._apply)
             ssaref = stmt.args[end-1]
             if isa(ssaref, JuliaInterpreter.SSAValue)
