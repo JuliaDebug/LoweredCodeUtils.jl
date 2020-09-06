@@ -110,7 +110,7 @@ struct SelfCall
     linetop::Int
     linebody::Int
     callee::Symbol
-    caller::Union{Symbol,Bool}
+    caller::Union{Symbol,Bool,Nothing}
 end
 
 """
@@ -169,7 +169,7 @@ function identify_framemethod_calls(frame)
             end
             msrc = stmt.args[3]
             if msrc isa CodeInfo
-                key = key::Union{Symbol,Bool}
+                key = key::Union{Symbol,Bool,Nothing}
                 for (j, mstmt) in enumerate(msrc.code)
                     isa(mstmt, Expr) || continue
                     if mstmt.head === :call
@@ -209,7 +209,7 @@ function identify_framemethod_calls(frame)
 end
 
 function callchain(selfcalls)
-    calledby = Dict{Symbol,Union{Symbol,Bool}}()
+    calledby = Dict{Symbol,Union{Symbol,Bool,Nothing}}()
     for sc in selfcalls
         startswith(String(sc.callee), '#') || continue
         caller = get(calledby, sc.callee, nothing)

@@ -87,7 +87,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
                :((::Caller)(x::String) = length(x)),
                )
         Core.eval(Lowering, ex)
-        frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+        frame = Frame(Lowering, ex)
         rename_framemethods!(frame)
         pc = methoddefs!(signatures, frame; define=false)
         push!(newcode, frame.framecode.src)
@@ -145,25 +145,25 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         end
     end
     Core.eval(Lowering, ex)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
     methoddefs!(signatures, frame; define=false)
     @test length(signatures) == 1
     @test LoweredCodeUtils.whichtt(signatures[1]) == first(methods(Lowering.fouter))
 
     # Check output of methoddef!
-    frame = JuliaInterpreter.prepare_thunk(Lowering, :(function nomethod end))
+    frame = Frame(Lowering, :(function nomethod end))
     ret = methoddef!(empty!(signatures), frame; define=true)
     @test isempty(signatures)
     @test ret === nothing
-    frame = JuliaInterpreter.prepare_thunk(Lowering, :(function amethod() nothing end))
+    frame = Frame(Lowering, :(function amethod() nothing end))
     ret = methoddef!(empty!(signatures), frame; define=true)
     @test !isempty(signatures)
     @test isa(ret, NTuple{2,Int})
 
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
-    frame = JuliaInterpreter.prepare_thunk(Base, ex)
+    frame = Frame(Base, ex)
     rename_framemethods!(frame)
     signatures = Set{Any}()
     methoddef!(signatures, frame; define=false)
@@ -172,11 +172,11 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
 
     # define
     ex = :(fdefine(x) = 1)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
     @test_throws MethodError Lowering.fdefine(0)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
     @test Lowering.fdefine(0) == 1
@@ -191,7 +191,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
             return ex
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
@@ -200,14 +200,14 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     ex = quote
         another_kwdef(x, y=1; z="hello") = 333
     end
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
     @test length(signatures) == 5
     @test Lowering.another_kwdef(0) == 333
     ex = :(@generated genkw2(; b=2) = nothing)  # https://github.com/timholy/Revise.jl/issues/290
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     # rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
@@ -229,7 +229,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
             end
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(Base, ex)
+    frame = Frame(Base, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     stmt = JuliaInterpreter.pc_expr(frame)
@@ -242,7 +242,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
 
     # With anonymous functions in signatures
     ex = :(const BitIntegerType = Union{map(T->Type{T}, Base.BitInteger_types)...})
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
@@ -275,17 +275,17 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
             end
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(Base, ex)
+    frame = Frame(Base, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
     @test length(signatures) >= 3
 
     ex = :(typedsig(x) = 1)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     methoddefs!(signatures, frame; define=true)
     ex = :(typedsig(x::Int) = 2)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod3, frame, true)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
@@ -299,7 +299,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         keywrd3(x; kwarg=:stuff) = 3
     end
     Core.eval(Lowering, ex)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     pc, pc3 = methoddef!(signatures, frame; define=false)
@@ -312,7 +312,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
 
     # Module-scoping
     ex = :(Base.@irrational π        3.14159265358979323846  pi)
-    frame = JuliaInterpreter.prepare_thunk(Base.MathConstants, ex)
+    frame = Frame(Base.MathConstants, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
@@ -330,7 +330,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         end
     end
     Core.eval(Lowering, ex)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
@@ -344,7 +344,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         end
     end
     Core.eval(Lowering, ex)
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     dct = rename_framemethods!(frame)
     ks = collect(filter(k->startswith(String(k), "#Items#"), keys(dct)))
     @test length(ks) == 2
@@ -364,7 +364,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
      end)
     empty!(signatures)
     Core.eval(Lowering422, ex)
-    frame = JuliaInterpreter.prepare_thunk(Lowering422, ex)
+    frame = Frame(Lowering422, ex)
     rename_framemethods!(frame)
     pc = methoddefs!(signatures, frame; define=false)
     @test typeof(Lowering422.fneg) ∈ Set(Base.unwrap_unionall(sig).parameters[1] for sig in signatures)
@@ -384,6 +384,6 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
             end
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(Lowering, ex)
+    frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
 end

@@ -59,7 +59,7 @@ end
         k = rand()
         b = 2*a + 5
     end
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Check that the result of direct evaluation agrees with selective evaluation
@@ -98,7 +98,7 @@ end
             a2 = 2
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = lines_required(:a2, src, edges)
@@ -119,7 +119,7 @@ end
             y3 = 7
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = lines_required(:a3, src, edges)
@@ -140,7 +140,7 @@ end
     Core.eval(ModEval, ex)
     @test ModEval.foo() == 0
     @test ModEval.bar() == 1
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Mark just the load of Core.eval
@@ -167,7 +167,7 @@ end
             k11 += i
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     JuliaInterpreter.finish_and_return!(frame, true)
     @test ModSelective.k11 == 11
     @test 3 <= ModSelective.s11 <= 15
@@ -180,7 +180,7 @@ end
 
     # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Check that the StructParent name is discovered everywhere it is used
@@ -191,7 +191,7 @@ end
     @test supertype(ModSelective.StructParent) === AbstractArray
     # Also check redefinition (it's OK when the definition doesn't change)
     Core.eval(ModEval, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModEval, ex)
+    frame = Frame(ModEval, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = minimal_evaluation(hastrackedexpr, src, edges)
@@ -201,7 +201,7 @@ end
     # Finding all dependencies in a struct definition
     # Nonparametric
     ex = :(struct NoParam end)
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:NoParam,false), src, edges)  # initially mark only the constructor
@@ -213,7 +213,7 @@ end
             x::Vector{T}
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:Struct,false), src, edges)  # initially mark only the constructor
@@ -230,7 +230,7 @@ end
             end
         end
     end
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges)  # initially mark only the constructor
@@ -240,7 +240,7 @@ end
 
     # Anonymous functions
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))
-    frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+    frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = fill(false, length(src.code))
@@ -259,7 +259,7 @@ end
         end
     end
     Core.eval(ModEval, ex)
-    frame = JuliaInterpreter.prepare_thunk(ModEval, ex)
+    frame = Frame(ModEval, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; exclude_named_typedefs=true)  # initially mark only the constructor
@@ -325,7 +325,7 @@ end
             @test occursin("No IR statement printer", str)
         end
         # Works with Frames too
-        frame = JuliaInterpreter.prepare_thunk(ModSelective, ex)
+        frame = Frame(ModSelective, ex)
         edges = CodeEdges(frame.framecode.src)
         LoweredCodeUtils.print_with_code(io, frame, edges)
         str = String(take!(io))
