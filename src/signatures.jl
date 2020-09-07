@@ -449,7 +449,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
         if (meth === nothing || !(meth.sig <: sigt && sigt <: meth.sig)) && define
-            step_expr!(recurse, frame, stmt, true)
+            pc = step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
         end
         if isa(meth, Method)
@@ -471,7 +471,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             end
         end
         frame.pc = pc
-        return ( define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame) ), pc3
+        return ( define ? pc : next_or_nothing!(frame) ), pc3
     end
     ismethod1(stmt) || error("expected method opening, got ", stmt)
     name = stmt.args[1]
