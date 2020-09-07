@@ -94,6 +94,8 @@ function print_names(io::IO, cl::CodeLinks)
     end
 end
 
+const preprinter_sentinel = isdefined(Base.IRShow, :statementidx_lineinfo_printer) ? 0 : typemin(Int32)
+
 if isdefined(Base.IRShow, :show_ir_stmt)
     function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
         src = JuliaInterpreter.copy_codeinfo(src)
@@ -118,7 +120,7 @@ if isdefined(Base.IRShow, :show_ir_stmt)
             bb_idx_prev = bb_idx
         end
         max_bb_idx_size = ndigits(length(cfg.blocks))
-        line_info_preprinter(io, " "^(max_bb_idx_size + 2), typemin(Int32))
+        line_info_preprinter(io, " "^(max_bb_idx_size + 2), preprinter_sentinel)
         postprint(io)
         return nothing
     end
@@ -698,7 +700,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                             for s in var.succs
                                 s ∈ norequire && continue
                                 stmt2 = src.code[s]
-                                if isexpr(stmt2, :method) && (stmt2::Expr).args[1] === false
+                                if isexpr(stmt2, :method) && (fname = (stmt2::Expr).args[1]; fname === false || fname === nothing)
                                     isrequired[s] = true
                                 end
                             end
