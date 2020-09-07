@@ -686,8 +686,10 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         # So far, everything is generic graph traversal. Now we add some domain-specific information.
         # New struct definitions, including their constructors, get spread out over many
         # statements. If we're evaluating any of them, it's important to evaluate *all* of them.
-        for (idx, stmt) in enumerate(src.code)
-            isrequired[idx] || continue
+        idx = 1
+        while idx < length(src.code)
+            stmt = src.code[idx]
+            isrequired[idx] || (idx += 1; continue)
             for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
                 if idx ∈ typedefr
                     ireq = view(isrequired, typedefr)
@@ -706,6 +708,8 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                             end
                         end
                     end
+                    idx = last(typedefr) + 1
+                    continue
                 end
             end
             # Anonymous functions may not yet include the method definition
@@ -722,6 +726,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                     end
                 end
             end
+            idx += 1
         end
         iter += 1  # just for diagnostics
     end
