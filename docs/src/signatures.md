@@ -140,7 +140,7 @@ We can also rename these methods, if we first turn it into a `frame`:
 ```julia
 julia> using JuliaInterpreter
 
-julia> frame = JuliaInterpreter.prepare_thunk(Main, lwr)
+julia> frame = Frame(Main, lwr.args[1])
 Frame for Main
    1 0  1 ─       $(Expr(:thunk, CodeInfo(
    2 0  1 ─     return $(Expr(:method, :f))

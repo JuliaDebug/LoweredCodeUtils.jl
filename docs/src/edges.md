@@ -251,7 +251,7 @@ We can test this with the following:
 ```julia
 julia> using JuliaInterpreter
 
-julia> frame = JuliaInterpreter.prepare_thunk(Main, lwr)
+julia> frame = Frame(Main, lwr.args[1])
 Frame for Main
    1 2  1 ─       s = 0
    2 3  │         k = 5

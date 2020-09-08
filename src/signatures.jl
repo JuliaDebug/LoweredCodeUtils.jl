@@ -110,7 +110,7 @@ struct SelfCall
     linetop::Int
     linebody::Int
     callee::Symbol
-    caller::Union{Symbol,Bool}
+    caller::Union{Symbol,Bool,Nothing}
 end
 
 """
@@ -169,7 +169,7 @@ function identify_framemethod_calls(frame)
             end
             msrc = stmt.args[3]
             if msrc isa CodeInfo
-                key = key::Union{Symbol,Bool}
+                key = key::Union{Symbol,Bool,Nothing}
                 for (j, mstmt) in enumerate(msrc.code)
                     isa(mstmt, Expr) || continue
                     if mstmt.head === :call
@@ -209,7 +209,7 @@ function identify_framemethod_calls(frame)
 end
 
 function callchain(selfcalls)
-    calledby = Dict{Symbol,Union{Symbol,Bool}}()
+    calledby = Dict{Symbol,Union{Symbol,Bool,Nothing}}()
     for sc in selfcalls
         startswith(String(sc.callee), '#') || continue
         caller = get(calledby, sc.callee, nothing)
@@ -442,19 +442,18 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     framecode, pcin = frame.framecode, pc
     if ismethod3(stmt)
         pc3 = pc
-        sigt, pc = signature(recurse, frame, stmt, pc)
-        if sigt === nothing && define
-            step_expr!(recurse, frame, stmt, true)
-        end
+        arg1 = stmt.args[1]
         sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
-        if (meth === nothing || !(meth.sig <: sigt && sigt <: meth.sig)) && define
-            step_expr!(recurse, frame, stmt, true)
+        if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
+            pc = next_or_nothing!(frame)
+        elseif define
+            pc = step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
         end
         if isa(meth, Method)
             push!(signatures, meth.sig)
-        elseif stmt.args[1] === false
+        elseif arg1 === false || arg1 === nothing
             # If it's anonymous and not defined, define it
             pc = step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
@@ -465,13 +464,13 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             code = framecode.src
             codeloc = codelocation(code, pc)
             loc = linetable(code, codeloc)
-            ft = Base.unwrap_unionall(Base.unwrap_unionall(sigt).parameters[1])
+            ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
             if !startswith(String(ft.name.name), "##")
                 @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
             end
         end
         frame.pc = pc
-        return ( define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame) ), pc3
+        return pc, pc3
     end
     ismethod1(stmt) || error("expected method opening, got ", stmt)
     name = stmt.args[1]
@@ -488,7 +487,8 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             stmt = pc_expr(frame, pc)
         end
         pc3 = pc
-        name3 = (stmt::Expr).args[1]
+        stmt = stmt::Expr
+        name3 = stmt.args[1]
         sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
@@ -575,7 +575,7 @@ function bodymethod(mkw::Method)
     local src
     while true
         framecode = JuliaInterpreter.get_framecode(m)
-        fakeargs = Any[nothing for i = 1:framecode.scope.nargs]
+        fakeargs = Any[nothing for i = 1:(framecode.scope::Method).nargs]
         frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
         src = framecode.src
         (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
@@ -584,13 +584,13 @@ function bodymethod(mkw::Method)
         while pc < length(src.code) - 1
             pc = step_expr!(frame)
         end
-        val = pc > 1 ? frame.framedata.ssavalues[pc-1] : src.code[1].args[end]
-        sig = Tuple{Base.unwrap_unionall(m.sig).parameters..., typeof(val)}
+        val = pc > 1 ? frame.framedata.ssavalues[pc-1] : (src.code[1]::Expr).args[end]
+        sig = Tuple{(Base.unwrap_unionall(m.sig)::DataType).parameters..., typeof(val)}
         m = whichtt(sig)
     end
     length(src.code) > 1 || return m
     stmt = src.code[end-1]
-    if isexpr(stmt, :call) && (f = stmt.args[1]; isa(f, QuoteNode))
+    if isexpr(stmt, :call) && (f = (stmt::Expr).args[1]; isa(f, QuoteNode))
         if f.value === (isdefined(Core, :_apply_iterate) ? Core._apply_iterate : Core._apply)
             ssaref = stmt.args[end-1]
             if isa(ssaref, JuliaInterpreter.SSAValue)

@@ -33,9 +33,12 @@ if ccall(:jl_generating_output, Cint, ()) == 1
         @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Function, ct, Frame})
     end
     @assert precompile(Tuple{typeof(rename_framemethods!), Any, Frame, Dict{Symbol,MethodInfo},
+                             Vector{SelfCall}, Dict{Symbol,Union{Nothing, Bool, Symbol}}})
+    @assert precompile(Tuple{typeof(rename_framemethods!), Any, Frame, Dict{Symbol,MethodInfo},
                              Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}},
                              Dict{Symbol,Union{Bool, Symbol}}})
     @assert precompile(Tuple{typeof(identify_framemethod_calls), Frame})
+    @assert precompile(Tuple{typeof(callchain), Vector{SelfCall}})
     @assert precompile(Tuple{typeof(callchain), Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}}})
 
     @assert precompile(CodeEdges, (CodeInfo,))
