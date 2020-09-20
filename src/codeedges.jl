@@ -667,6 +667,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                     isrequired[idxlast] = true
                 end
                 for ibbp in bb.preds
+                    ibbp > 0 || continue # see Core.Compiler.compute_basic_blocks, near comment re :enter
                     rpred = rng(bbs.blocks[ibbp])
                     idxlast = rpred[end]
                     idxlast ∈ norequire && continue

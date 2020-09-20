@@ -273,6 +273,22 @@ end
         end
     end
 
+    # https://github.com/timholy/Revise.jl/issues/538
+    thk = Meta.lower(ModEval, quote
+        try
+            global function v1(x::Float32)
+                println("F32")
+            end
+        catch e
+            println("caught error")
+        end
+    end)
+    src = thk.args[1]
+    edges = CodeEdges(src)
+    lr = lines_required(:v1, src, edges)
+    idx = findfirst(stmt->Meta.isexpr(stmt, :leave), src.code)
+    @test lr[idx]
+
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and
         # ensuring that these structures are as "self-documenting" as possible.
