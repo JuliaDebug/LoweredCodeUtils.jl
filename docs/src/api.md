@@ -29,7 +29,7 @@ LoweredCodeUtils.MethodInfo
 LoweredCodeUtils.identify_framemethod_calls
 LoweredCodeUtils.iscallto
 LoweredCodeUtils.getcallee
-LoweredCodeUtils.find_corrected_name
+LoweredCodeUtils.find_name_caller_sig
 LoweredCodeUtils.replacename!
 LoweredCodeUtils.Variable
 ```

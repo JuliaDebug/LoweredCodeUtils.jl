@@ -350,6 +350,8 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     @test length(ks) == 2
     @test dct[ks[1]] == dct[ks[2]]
     @test isdefined(Lowering, ks[1]) || isdefined(Lowering, ks[2])
+    nms = filter(sym->occursin(r"#Items#\d+#\d+", String(sym)), names(Lowering; all=true))
+    @test length(nms) == 1
 
     # https://github.com/timholy/Revise.jl/issues/422
     ex = :(@generated function fneg(x::T) where T<:LT{<:FloatingTypes}
