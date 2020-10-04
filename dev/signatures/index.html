@@ -98,7 +98,7 @@ julia&gt; using LoweredCodeUtils
 julia&gt; bodymethod(m)
 #f#1(color::Symbol, ::typeof(f), x) in Main at REPL[1]:1</code></pre><p>We can also rename these methods, if we first turn it into a <code>frame</code>:</p><pre><code class="language-julia">julia&gt; using JuliaInterpreter
 
-julia&gt; frame = JuliaInterpreter.prepare_thunk(Main, lwr)
+julia&gt; frame = Frame(Main, lwr.args[1])
 Frame for Main
    1 0  1 ─       $(Expr(:thunk, CodeInfo(
    2 0  1 ─     return $(Expr(:method, :f))
@@ -177,4 +177,4 @@ end)))
 │       f
 │       ($(QuoteNode(ifelse)))(false, false, %J25)
 └──     return %J26
-)</code></pre><p>While there are a few differences in representation stemming from converting it to a frame, you can see that the <code>#f#2</code>s have been changed to <code>#f#1</code>s to match the currently-running names.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../edges/">Edges »</a></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Sunday 21 June 2020 21:57">Sunday 21 June 2020</span>. Using Julia version 1.4.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+)</code></pre><p>While there are a few differences in representation stemming from converting it to a frame, you can see that the <code>#f#2</code>s have been changed to <code>#f#1</code>s to match the currently-running names.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../edges/">Edges »</a></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Sunday 4 October 2020 13:12">Sunday 4 October 2020</span>. Using Julia version 1.5.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
