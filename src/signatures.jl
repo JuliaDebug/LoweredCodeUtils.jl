@@ -319,18 +319,6 @@ function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentnam
             stmt = pc_expr(frame, pc)
         end
         body = stmt.args[3]
-        if stmt.args[1] !== name && isa(body, SSAValue)
-            # OK, we can't skip all the stuff that might define the body
-            # See https://github.com/timholy/Revise.jl/issues/398
-            pc = pc0
-            stmt = pc_expr(frame, pc)
-            while !ismethod3(stmt)
-                pc = step_expr!(recurse, frame, stmt, true)
-                pc === nothing && return nothing
-                stmt = pc_expr(frame, pc)
-            end
-            body = @lookup(frame, stmt.args[3])
-        end
         if stmt.args[1] !== name && isa(body, CodeInfo)
             # This might be the GeneratedFunctionStub for a @generated method
             for (i, bodystmt) in enumerate(body.code)
