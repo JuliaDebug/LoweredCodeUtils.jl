@@ -19,6 +19,20 @@ const LT{T} = Union{LVec{<:Any, T}, T}
 const FloatingTypes = Union{Float32, Float64}
 end
 
+# Stuff for https://github.com/timholy/Revise.jl/issues/550
+if Base.VERSION >= v"1.1"
+    try
+        using CBinding
+    catch
+        @info "Adding CBinding to the environment for test purposes"
+        using Pkg
+        Pkg.add("CBinding")    # not available for Julia 1.0
+    end
+    eval(:(module Lowering550
+    using CBinding
+    end))
+end
+
 bodymethtest0(x) = 0
 function bodymethtest0(x)
     y = 2x
@@ -370,6 +384,19 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     rename_framemethods!(frame)
     pc = methoddefs!(signatures, frame; define=false)
     @test typeof(Lowering422.fneg) ∈ Set(Base.unwrap_unionall(sig).parameters[1] for sig in signatures)
+
+    # https://github.com/timholy/Revise.jl/issues/550
+    if Base.VERSION >= v"1.1"
+        ex = :(@cstruct S {
+            val::Int8
+        })
+        empty!(signatures)
+        Core.eval(Lowering550, ex)
+        frame = Frame(Lowering550, ex)
+        rename_framemethods!(frame)
+        pc = methoddefs!(signatures, frame; define=false)
+        @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
+    end
 
     # Undefined names
     # This comes from FileWatching; WindowsRawSocket is only defined on Windows
