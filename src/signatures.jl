@@ -459,6 +459,9 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
                 if !startswith(String(ft.name.name), "##")
                     @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
                 end
+                if pc == pc3
+                    pc = next_or_nothing!(frame)
+                end
             end
         end
         frame.pc = pc
