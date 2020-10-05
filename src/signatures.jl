@@ -441,22 +441,24 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
             pc = step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
         end
-        if isa(meth, Method)
+        if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
             push!(signatures, meth.sig)
-        elseif arg1 === false || arg1 === nothing
-            # If it's anonymous and not defined, define it
-            pc = step_expr!(recurse, frame, stmt, true)
-            meth = whichtt(sigt)
-            isa(meth, Method) && push!(signatures, meth.sig)
-            return pc, pc3
         else
-            # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
-            code = framecode.src
-            codeloc = codelocation(code, pc)
-            loc = linetable(code, codeloc)
-            ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
-            if !startswith(String(ft.name.name), "##")
-                @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
+            if arg1 === false || arg1 === nothing
+                # If it's anonymous and not defined, define it
+                pc = step_expr!(recurse, frame, stmt, true)
+                meth = whichtt(sigt)
+                isa(meth, Method) && push!(signatures, meth.sig)
+                return pc, pc3
+            else
+                # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
+                code = framecode.src
+                codeloc = codelocation(code, pc)
+                loc = linetable(code, codeloc)
+                ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
+                if !startswith(String(ft.name.name), "##")
+                    @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
+                end
             end
         end
         frame.pc = pc
