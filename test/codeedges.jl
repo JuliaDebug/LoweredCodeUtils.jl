@@ -185,7 +185,6 @@ end
     edges = CodeEdges(src)
     # Check that the StructParent name is discovered everywhere it is used
     var = edges.byname[:StructParent]
-    @test var.preds[end] ∈ var.succs
     isrequired = minimal_evaluation(hastrackedexpr, src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModSelective.StructParent) === AbstractArray

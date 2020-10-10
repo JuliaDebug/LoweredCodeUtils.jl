@@ -304,8 +304,6 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, @no
         for i in arng
             add_links!(target, stmt.args[i], cl)
         end
-    elseif isa(stmt, QuoteNode)
-        add_links!(target, stmt.value, cl)
     elseif is_GotoIfNot(stmt)
         add_links!(target, (stmt::Core.GotoIfNot).cond, cl)
     elseif is_ReturnNode(stmt)
