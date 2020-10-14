@@ -87,11 +87,14 @@ function istypedef(stmt)
     stmt = rhs(stmt)
     isa(stmt, Expr) || return false
     stmt.head ∈ structheads && return true
-    @static if isdefined(Core, :_structtype)
+    @static if all(s->isdefined(Core,s), structdecls)
+        if isexpr(stmt, :(=))
+            stmt = (stmt::Expr).args[2] # look for lhs
+        end
         if stmt.head === :call
             f = stmt.args[1]
             if isa(f, GlobalRef)
-                f.mod === Core && f.name ∈ (:_structype, :_abstracttype, :_primitivetype) && return true
+                f.mod === Core && f.name ∈ structdecls && return true
             end
             if isa(f, QuoteNode)
                 (f.value === Core._structtype || f.value === Core._abstracttype ||
