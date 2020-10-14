@@ -1,6 +1,6 @@
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
-using LoweredCodeUtils: callee_matches
+using LoweredCodeUtils: callee_matches, istypedef
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
@@ -350,5 +350,71 @@ end
         else
             @test occursin("No IR statement printer", str)
         end
+    end
+end
+
+@testset "selective interpretation of toplevel definitions" begin
+    gen_mock_module() = Core.eval(@__MODULE__, :(module $(gensym(:LoweredCodeUtilsTestMock)) end))
+    function check_toplevel_definition_interprete(ex, defs, undefs)
+        m = gen_mock_module()
+        lwr = Meta.lower(m, ex)
+        src = first(lwr.args)
+        stmts = src.code
+        edges = CodeEdges(src)
+
+        isrq = lines_required!(istypedef.(stmts), src, edges)
+        frame = Frame(m, src)
+        selective_eval_fromstart!(frame, isrq, #= toplevel =# true)
+
+        for def in defs; @test isdefined(m, def); end
+        for undef in undefs; @test !isdefined(m, undef); end
+    end
+
+    @testset "interpret: $(defs), ignore $(undefs)" for (ex, defs, undefs) in (
+            (:(abstract type Foo end), (:Foo,), ()),
+
+            (:(struct Foo end), (:Foo,), ()),
+
+            (quote
+                struct Foo
+                    val
+                end
+            end, (:Foo,), ()),
+
+            (quote
+                struct Foo{T}
+                    val::T
+                    Foo(v::T) where {T} = new{T}(v)
+                end
+            end, (:Foo,), ()),
+
+            (:(primitive type Foo 32 end), (:Foo,), ()),
+
+            (quote
+                abstract type Foo end
+                struct Foo1 <: Foo end
+                struct Foo2 <: Foo end
+            end, (:Foo, :Foo1, :Foo2), ()),
+
+            (quote
+                struct Foo
+                    v
+                    Foo(f) = new(f())
+                end
+
+                foo = Foo(()->throw("don't interpret me"))
+            end, (:Foo,), (:foo,)),
+
+            # https://github.com/JuliaDebug/LoweredCodeUtils.jl/issues/47
+            (quote
+                struct Foo
+                    b::Bool
+                    Foo(b) = new(b)
+                end
+
+                foo = Foo(false)
+            end, (:Foo,), (:foo,))
+        )
+        check_toplevel_definition_interprete(ex, defs, undefs)
     end
 end
