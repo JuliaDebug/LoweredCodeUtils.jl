@@ -9,6 +9,7 @@ const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
 
 const structheads = VERSION >= v"1.5.0-DEV.702" ? () : (:struct_type, :abstract_type, :primitive_type)
 const trackedheads = (:method, structheads...)
+const structdecls = (:_structtype, :_abstracttype, :_primitivetype)
 
 export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod
 export CodeEdges, lines_required, lines_required!, selective_eval!, selective_eval_fromstart!

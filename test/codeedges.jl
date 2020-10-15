@@ -1,6 +1,6 @@
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
-using LoweredCodeUtils: callee_matches
+using LoweredCodeUtils: callee_matches, istypedef
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
@@ -350,5 +350,86 @@ end
         else
             @test occursin("No IR statement printer", str)
         end
+    end
+end
+
+@testset "selective interpretation of toplevel definitions" begin
+    gen_mock_module() = Core.eval(@__MODULE__, :(module $(gensym(:LoweredCodeUtilsTestMock)) end))
+    function check_toplevel_definition_interprete(ex, defs, undefs)
+        m = gen_mock_module()
+        lwr = Meta.lower(m, ex)
+        src = first(lwr.args)
+        stmts = src.code
+        edges = CodeEdges(src)
+
+        isrq = lines_required!(istypedef.(stmts), src, edges)
+        frame = Frame(m, src)
+        selective_eval_fromstart!(frame, isrq, #= toplevel =# true)
+
+        for def in defs; @test isdefined(m, def); end
+        for undef in undefs; @test !isdefined(m, undef); end
+    end
+
+    @testset "case: $(i), interpret: $(defs), ignore $(undefs)" for (i, ex, defs, undefs) in (
+            (1, :(abstract type Foo end), (:Foo,), ()),
+
+            (2, :(struct Foo end), (:Foo,), ()),
+
+            (3, quote
+                struct Foo
+                    val
+                end
+            end, (:Foo,), ()),
+
+            (4, quote
+                struct Foo{T}
+                    val::T
+                    Foo(v::T) where {T} = new{T}(v)
+                end
+            end, (:Foo,), ()),
+
+            (5, :(primitive type Foo 32 end), (:Foo,), ()),
+
+            (6, quote
+                abstract type Foo end
+                struct Foo1 <: Foo end
+                struct Foo2 <: Foo end
+            end, (:Foo, :Foo1, :Foo2), ()),
+
+            (7, quote
+                struct Foo
+                    v
+                    Foo(f) = new(f())
+                end
+
+                foo = Foo(()->throw("don't interpret me"))
+            end, (:Foo,), (:foo,)),
+
+            # https://github.com/JuliaDebug/LoweredCodeUtils.jl/issues/47
+            (8, quote
+                struct Foo
+                    b::Bool
+                    Foo(b) = new(b)
+                end
+
+                foo = Foo(false)
+            end, (:Foo,), (:foo,)),
+
+            # https://github.com/JuliaDebug/LoweredCodeUtils.jl/pull/48
+            # we shouldn't make `add_links!` recur into `QuoteNode`, otherwise the variable
+            # `bar` will be selected as a requirement for `Bar1` (, which has "bar" field)
+            (9, quote
+                abstract type Bar end
+                struct Bar1 <: Bar
+                    bar
+                end
+
+                r = (throw("don't interpret me"); rand(10000000000000000))
+                bar = Bar1(r)
+                show(bar)
+            end, (:Bar, :Bar1), (:r, :bar))
+        )
+
+        check_toplevel_definition_interprete(ex, defs, undefs)
     end
 end
