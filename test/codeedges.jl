@@ -370,33 +370,33 @@ end
         for undef in undefs; @test !isdefined(m, undef); end
     end
 
-    @testset "interpret: $(defs), ignore $(undefs)" for (ex, defs, undefs) in (
-            (:(abstract type Foo end), (:Foo,), ()),
+    @testset "case: $(i), interpret: $(defs), ignore $(undefs)" for (i, ex, defs, undefs) in (
+            (1, :(abstract type Foo end), (:Foo,), ()),
 
-            (:(struct Foo end), (:Foo,), ()),
+            (2, :(struct Foo end), (:Foo,), ()),
 
-            (quote
+            (3, quote
                 struct Foo
                     val
                 end
             end, (:Foo,), ()),
 
-            (quote
+            (4, quote
                 struct Foo{T}
                     val::T
                     Foo(v::T) where {T} = new{T}(v)
                 end
             end, (:Foo,), ()),
 
-            (:(primitive type Foo 32 end), (:Foo,), ()),
+            (5, :(primitive type Foo 32 end), (:Foo,), ()),
 
-            (quote
+            (6, quote
                 abstract type Foo end
                 struct Foo1 <: Foo end
                 struct Foo2 <: Foo end
             end, (:Foo, :Foo1, :Foo2), ()),
 
-            (quote
+            (7, quote
                 struct Foo
                     v
                     Foo(f) = new(f())
@@ -406,15 +406,30 @@ end
             end, (:Foo,), (:foo,)),
 
             # https://github.com/JuliaDebug/LoweredCodeUtils.jl/issues/47
-            (quote
+            (8, quote
                 struct Foo
                     b::Bool
                     Foo(b) = new(b)
                 end
 
                 foo = Foo(false)
-            end, (:Foo,), (:foo,))
+            end, (:Foo,), (:foo,)),
+
+            # https://github.com/JuliaDebug/LoweredCodeUtils.jl/pull/48
+            # we shouldn't make `add_links!` recur into `QuoteNode`, otherwise the variable
+            # `bar` will be selected as a requirement for `Bar1` (, which has "bar" field)
+            (9, quote
+                abstract type Bar end
+                struct Bar1 <: Bar
+                    bar
+                end
+
+                r = (throw("don't interpret me"); rand(10000000000000000))
+                bar = Bar1(r)
+                show(bar)
+            end, (:Bar, :Bar1), (:r, :bar))
         )
+
         check_toplevel_definition_interprete(ex, defs, undefs)
     end
 end
