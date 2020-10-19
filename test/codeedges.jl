@@ -144,7 +144,8 @@ end
     src = frame.framecode.src
     edges = CodeEdges(src)
     # Mark just the load of Core.eval
-    haseval(stmt) = isa(stmt, Expr) && JuliaInterpreter.hasarg(isequal(:eval), stmt.args)
+    haseval(stmt) = (isa(stmt, Expr) && JuliaInterpreter.hasarg(isequal(:eval), stmt.args)) ||
+                    (isa(stmt, Expr) && stmt.head === :call && is_quotenode(stmt.args[1], Core.eval))
     isrequired = map(haseval, src.code)
     @test sum(isrequired) == 1
     isrequired[edges.succs[findfirst(isrequired)]] .= true   # add lines that use Core.eval
