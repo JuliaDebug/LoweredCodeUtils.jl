@@ -88,9 +88,6 @@ function istypedef(stmt)
     isa(stmt, Expr) || return false
     stmt.head ∈ structheads && return true
     @static if all(s->isdefined(Core,s), structdecls)
-        if isexpr(stmt, :(=))
-            stmt = (stmt::Expr).args[2] # look for lhs
-        end
         if stmt.head === :call
             f = stmt.args[1]
             if isa(f, GlobalRef)
