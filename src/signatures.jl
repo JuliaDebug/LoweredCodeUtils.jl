@@ -436,7 +436,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
-            pc = next_or_nothing!(frame)
+            pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame)
         elseif define
             pc = step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
