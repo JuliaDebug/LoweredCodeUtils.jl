@@ -398,6 +398,22 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
     end
 
+    # Scoped names (https://github.com/timholy/Revise.jl/issues/568)
+    ex = :(f568() = -1)
+    Core.eval(Lowering, ex)
+    @test Lowering.f568() == -1
+    empty!(signatures)
+    ex = :(f568() = -2)
+    frame = Frame(Lowering, ex)
+    pcstop = findfirst(LoweredCodeUtils.ismethod3, frame.framecode.src.code)
+    pc = 1
+    while pc < pcstop
+        pc = JuliaInterpreter.step_expr!(finish_and_return!, frame, true)
+    end
+    pc = methoddef!(finish_and_return!, signatures, frame, pc; define=true)
+    @test Tuple{typeof(Lowering.f568)} ∈ signatures
+    @test Lowering.f568() == -2
+
     # Undefined names
     # This comes from FileWatching; WindowsRawSocket is only defined on Windows
     ex = quote
