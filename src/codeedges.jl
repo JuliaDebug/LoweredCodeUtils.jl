@@ -32,10 +32,12 @@ struct CodeLinks
     nameassigns::Dict{NamedVar,Vector{Int}}
 end
 function CodeLinks(nlines::Int, nslots::Int)
-    return CodeLinks([Links() for _ = 1:nlines],
-                     [Links() for _ = 1:nlines],
-                     [Links() for _ = 1:nslots],
-                     [Links() for _ = 1:nslots],
+    makelinks(n) = [Links() for _ = 1:n]
+
+    return CodeLinks(makelinks(nlines),
+                     makelinks(nlines),
+                     makelinks(nslots),
+                     makelinks(nslots),
                      [Int[] for _ = 1:nslots],
                      Dict{NamedVar,Links}(),
                      Dict{NamedVar,Links}(),

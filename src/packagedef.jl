@@ -42,6 +42,8 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     @assert precompile(Tuple{typeof(callchain), Vector{SelfCall}})
     @assert precompile(Tuple{typeof(callchain), Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}}})
 
+    @assert precompile(CodeLinks, (Int, Int))
+    @assert precompile(CodeEdges, (Int,))
     @assert precompile(CodeEdges, (CodeInfo,))
     @assert precompile(add_links!, (Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, Any, CodeLinks))
     @assert precompile(lines_required!, (Vector{Bool}, Set{NamedVar}, CodeInfo, CodeEdges))
