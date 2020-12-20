@@ -143,7 +143,7 @@ function identify_framemethod_calls(frame)
             if length(tsrc.code) == 1
                 tstmt = tsrc.code[1]
                 if is_return(tstmt)
-                    tex = isa(tstmt, Expr) ? tstmt.args[1] : tstmt.val
+                    tex = JuliaInterpreter.get_return_node(tstmt)
                     if isa(tex, Expr)
                         if tex.head === :method && (methname = tex.args[1]; isa(methname, Symbol))
                             push!(refs, methname=>i)
