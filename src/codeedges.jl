@@ -11,7 +11,7 @@ struct Links
     slots::Vector{Int}
     names::Vector{NamedVar}
 end
-Links() = Links(Int[], Int[], Int[])
+Links() = Links(Int[], Int[], NamedVar[])
 
 function Base.show(io::IO, l::Links)
     print(io, "ssas: ", showempty(l.ssas),
