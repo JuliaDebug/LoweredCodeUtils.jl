@@ -169,7 +169,7 @@ function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks, bbc
     stmt = src.code[idx]
     if isexpr(stmt, :(=))
         lhs = stmt.args[1]
-        if isslotnum(lhs)
+        if @issslotnum(lhs)
             # id = lhs.id
             # preds, succs = cl.slotpreds[id], cl.slotsuccs[id]
             printstyled(io, "see slot ", lhs.id, '\n', color=:yellow)
@@ -246,7 +246,7 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             # An assignment
             stmt = stmt::Expr
             lhs, rhs = stmt.args[1], stmt.args[2]
-            if isslotnum(lhs)
+            if @issslotnum(lhs)
                 lhs = lhs::AnySlotNumber
                 id = lhs.id
                 target = P(SlotNumber(id), cl.slotpreds[id])
@@ -278,11 +278,11 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, @no
     _targetid, targetstore = target
     targetid = _targetid::Union{SSAValue,SlotNumber,NamedVar}
     # Adds bidirectional edges
-    if isssa(stmt)
+    if @isssa(stmt)
         stmt = stmt::AnySSAValue
         push!(targetstore, SSAValue(stmt.id))    # forward edge
         push!(cl.ssasuccs[stmt.id], targetid)    # backward edge
-    elseif isslotnum(stmt)
+    elseif @issslotnum(stmt)
         stmt = stmt::AnySlotNumber
         push!(targetstore, SlotNumber(stmt.id))
         push!(cl.slotsuccs[stmt.id], targetid)
@@ -298,7 +298,7 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, @no
         arng = 1:length(stmt.args)
         if stmt.head === :call
             f = stmt.args[1]
-            if !isssa(f) && !isslotnum(f)
+            if !@isssa(f) && !@issslotnum(f)
                 # Avoid putting named callees on the namestore
                 arng = 2:length(stmt.args)
             end
@@ -418,7 +418,7 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
             stmt = stmt::Expr
             lhs = stmt.args[1]
             # Mark predecessors and successors of this line by following ssas & named assignments
-            if isslotnum(lhs)
+            if @issslotnum(lhs)
                 lhs = lhs::AnySlotNumber
                 # This line assigns a slot. Mark all predecessors.
                 id = lhs.id
@@ -796,7 +796,7 @@ function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::Abstr
         pcexec = te ? pc : pcexec
     end
     isa(pc, BreakpointRef) && return pc
-    pcexec = pcexec === nothing ? pclast : pcexec
+    pcexec = (pcexec === nothing ? pclast : pcexec)::Int
     frame.pc = pcexec
     node = pc_expr(frame)
     is_return(node) && return lookup_return(frame, node)

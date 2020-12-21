@@ -1,8 +1,17 @@
 const AnySSAValue = Union{Core.Compiler.SSAValue,JuliaInterpreter.SSAValue}
 const AnySlotNumber = Union{Core.Compiler.SlotNumber,JuliaInterpreter.SlotNumber}
 
-isssa(stmt) = isa(stmt, Core.Compiler.SSAValue) | isa(stmt, JuliaInterpreter.SSAValue)
-isslotnum(stmt) = isa(stmt, Core.Compiler.SlotNumber) | isa(stmt, JuliaInterpreter.SlotNumber)
+# to circumvent https://github.com/JuliaLang/julia/issues/37342, we inline these `isa`
+# condition checks at surface AST level
+# https://github.com/JuliaLang/julia/pull/38905 will get rid of the need of these hacks
+macro isssa(stmt)
+    :($(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(Core.Compiler, :SSAValue))) ||
+      $(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(JuliaInterpreter, :SSAValue))))
+end
+macro issslotnum(stmt)
+    :($(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(Core.Compiler, :SlotNumber))) ||
+      $(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(JuliaInterpreter, :SlotNumber))))
+end
 
 """
     iscallto(stmt, name)
