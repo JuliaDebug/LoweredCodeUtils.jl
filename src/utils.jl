@@ -117,6 +117,7 @@ end
 function typedef_range(src::CodeInfo, idx)
     stmt = src.code[idx]
     istypedef(stmt) || error(stmt, " is not a typedef")
+    stmt = stmt::Expr
     isanonymous_typedef(stmt) && return idx:idx
     # Search backwards to the previous :global
     istart = idx
@@ -125,11 +126,17 @@ function typedef_range(src::CodeInfo, idx)
         istart -= 1
     end
     istart >= 1 || error("no initial :global found")
+    stmt.head ∈ structheads && return istart:idx
     iend, n = idx, length(src.code)
     while iend <= n
         stmt = src.code[iend]
         if isa(stmt, Expr)
             (stmt.head === :global || stmt.head === :return) && break
+            if stmt.head === :call && (is_global_ref(stmt.args[1], Core, :_typebody!) ||
+                                       isdefined(Core, :_typebody!) && is_quotenode(stmt.args[1], Core._typebody!))
+                iend += 1   # compensate for the `iend-1` in the return
+                break
+            end
         end
         is_return(stmt) && break
         iend += 1

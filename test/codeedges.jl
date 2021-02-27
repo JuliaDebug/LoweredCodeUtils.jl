@@ -289,6 +289,22 @@ end
     idx = findfirst(stmt->Meta.isexpr(stmt, :leave), src.code)
     @test lr[idx]
 
+    # https://github.com/timholy/Revise.jl/issues/599
+    thk = Meta.lower(Main, quote
+        mutable struct A
+            x::Int
+
+            A(x) = new(f(x))
+            f(x) = x^2
+        end
+    end)
+    src = thk.args[1]
+    edges = CodeEdges(src)
+    idx = findfirst(stmt->Meta.isexpr(stmt, :method), src.code)
+    lr = lines_required(idx, src, edges; exclude_named_typedefs=true)
+    idx = findfirst(stmt->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
+    @test lr[idx]
+
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and
         # ensuring that these structures are as "self-documenting" as possible.
