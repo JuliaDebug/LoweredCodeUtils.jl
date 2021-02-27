@@ -304,6 +304,17 @@ end
     lr = lines_required(idx, src, edges; exclude_named_typedefs=true)
     idx = findfirst(stmt->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
     @test lr[idx]
+    # but make sure we don't break primitivetype & abstracttype (https://github.com/timholy/Revise.jl/pull/611)
+    if isdefined(Core, :_primitivetype)
+        thk = Meta.lower(Main, quote
+            primitive type WindowsRawSocket sizeof(Ptr) * 8 end
+        end)
+        src = thk.args[1]
+        edges = CodeEdges(src)
+        idx = findfirst(istypedef, src.code)
+        r = LoweredCodeUtils.typedef_range(src, idx)
+        @test last(r) == length(src.code) - 1
+    end
 
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and
