@@ -128,14 +128,29 @@ function typedef_range(src::CodeInfo, idx)
     istart >= 1 || error("no initial :global found")
     stmt.head ∈ structheads && return istart:idx
     iend, n = idx, length(src.code)
+    have_typebody = have_equivtypedef = false
     while iend <= n
         stmt = src.code[iend]
         if isa(stmt, Expr)
             (stmt.head === :global || stmt.head === :return) && break
-            if stmt.head === :call && (is_global_ref(stmt.args[1], Core, :_typebody!) ||
-                                       isdefined(Core, :_typebody!) && is_quotenode(stmt.args[1], Core._typebody!))
-                iend += 1   # compensate for the `iend-1` in the return
-                break
+            if stmt.head === :call
+                if (is_global_ref(stmt.args[1], Core, :_typebody!) ||
+                    isdefined(Core, :_typebody!) && is_quotenode(stmt.args[1], Core._typebody!))
+                    have_typebody = true
+                elseif (is_global_ref(stmt.args[1], Core, :_equiv_typedef) ||
+                    isdefined(Core, :_equiv_typedef) && is_quotenode(stmt.args[1], Core._equiv_typedef))
+                    have_equivtypedef = true
+                    # Advance to the type-assignment
+                    while iend <= n
+                        stmt = src.code[iend]
+                        isexpr(stmt, :(=)) && break
+                        iend += 1
+                    end
+                end
+                if have_typebody && have_equivtypedef
+                    iend += 1   # compensate for the `iend-1` in the return
+                    break
+                end
             end
         end
         is_return(stmt) && break
