@@ -567,34 +567,35 @@ will end up skipping a subset of such statements, perhaps while repeating others
 
 See also [`lines_required!`](@ref) and [`selective_eval!`](@ref).
 """
-function lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges, args...)
+function lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
     objs = Set{Union{Symbol,GlobalRef}}([obj])
-    return lines_required!(isrequired, objs, src, edges, args...)
+    return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
-function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges, args...)
+function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
     isrequired[idx] = true
     objs = Set{Union{Symbol,GlobalRef}}()
-    return lines_required!(isrequired, objs, src, edges, args...)
+    return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
 """
-    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges, norequire = ())
+    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges;
+                    norequire = ())
 
 Like `lines_required`, but where `isrequired[idx]` has already been set to `true` for all statements
 that you know you need to evaluate. All other statements should be marked `false` at entry.
 On return, the complete set of required statements will be marked `true`.
 
-`norequire` specifies statements (represented as iterator of `Int`s) that should _not_ be
-marked as a requirement.
+`norequire` keyword argument specifies statements (represented as iterator of `Int`s) that
+should _not_ be marked as a requirement.
 For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src, edges)` if you're
 extracting method signatures and not evaluating new definitions.
 """
-function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges, norequire = ())
+function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; kwargs...)
     objs = Set{Union{Symbol,GlobalRef}}()
-    return lines_required!(isrequired, objs, src, edges, norequire)
+    return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
 function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
@@ -614,7 +615,7 @@ function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
     return norequire
 end
 
-function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges, norequire = ())
+function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges; norequire = ())
     # Do a traveral of "numbered" predecessors
     # We'll mostly use generic graph traversal to discover all the lines we need,
     # but structs are in a bit of a different category (especially on Julia 1.5+).

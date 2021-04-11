@@ -22,7 +22,7 @@ function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
     return false, haseval
 end
 
-function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges, args...)
+function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = fill(false, length(src.code))
     for (i, stmt) in enumerate(src.code)
         if !isrequired[i]
@@ -33,7 +33,7 @@ function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges, arg
         end
     end
     # All tracked expressions are marked. Now add their dependencies.
-    lines_required!(isrequired, src, edges, args...)
+    lines_required!(isrequired, src, edges; kwargs...)
     return isrequired
 end
 
@@ -262,7 +262,7 @@ end
     frame = Frame(ModEval, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges, exclude_named_typedefs(src, edges))  # initially mark only the constructor
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src, edges))  # initially mark only the constructor
     bbs = Core.Compiler.compute_basic_blocks(src.code)
     for (iblock, block) in enumerate(bbs.blocks)
         r = LoweredCodeUtils.rng(block)
@@ -301,7 +301,7 @@ end
     src = thk.args[1]
     edges = CodeEdges(src)
     idx = findfirst(stmt->Meta.isexpr(stmt, :method), src.code)
-    lr = lines_required(idx, src, edges, exclude_named_typedefs(src, edges))
+    lr = lines_required(idx, src, edges; norequire=exclude_named_typedefs(src, edges))
     idx = findfirst(stmt->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
     @test lr[idx]
     # but make sure we don't break primitivetype & abstracttype (https://github.com/timholy/Revise.jl/pull/611)
