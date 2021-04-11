@@ -19,20 +19,6 @@ const LT{T} = Union{LVec{<:Any, T}, T}
 const FloatingTypes = Union{Float32, Float64}
 end
 
-# Stuff for https://github.com/timholy/Revise.jl/issues/550
-if Base.VERSION >= v"1.1"
-    try
-        using CBinding
-    catch
-        @info "Adding CBinding to the environment for test purposes"
-        using Pkg
-        Pkg.add("CBinding")    # not available for Julia 1.0
-    end
-    eval(:(module Lowering550
-    using CBinding
-    end))
-end
-
 bodymethtest0(x) = 0
 function bodymethtest0(x)
     y = 2x
@@ -385,19 +371,6 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     pc = methoddefs!(signatures, frame; define=false)
     @test typeof(Lowering422.fneg) ∈ Set(Base.unwrap_unionall(sig).parameters[1] for sig in signatures)
 
-    # https://github.com/timholy/Revise.jl/issues/550
-    if Base.VERSION >= v"1.1"
-        ex = :(@cstruct S {
-            val::Int8
-        })
-        empty!(signatures)
-        Core.eval(Lowering550, ex)
-        frame = Frame(Lowering550, ex)
-        rename_framemethods!(frame)
-        pc = methoddefs!(signatures, frame; define=false)
-        @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
-    end
-
     # Scoped names (https://github.com/timholy/Revise.jl/issues/568)
     ex = :(f568() = -1)
     Core.eval(Lowering, ex)
@@ -431,4 +404,31 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     end
     frame = Frame(Lowering, ex)
     rename_framemethods!(frame)
+
+    # https://github.com/timholy/Revise.jl/issues/550
+    if Base.VERSION >= v"1.4"
+        using Pkg
+        try
+            # we test with the old version of CBinding, let's do it in an isolated environment
+            Pkg.activate(; temp=true)
+
+            @info "Adding CBinding to the environment for test purposes"
+            Pkg.add(; name="CBinding", version="0.9.4") # `@cstruct` isn't defined for v1.0 and above
+
+            m = Module()
+            Core.eval(m, :(using CBinding))
+
+            ex = :(@cstruct S {
+                val::Int8
+            })
+            empty!(signatures)
+            Core.eval(m, ex)
+            frame = Frame(m, ex)
+            rename_framemethods!(frame)
+            pc = methoddefs!(signatures, frame; define=false)
+            @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
+        finally
+            Pkg.activate() # back to the original environment
+        end
+    end
 end
