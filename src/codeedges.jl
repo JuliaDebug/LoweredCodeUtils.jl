@@ -577,52 +577,34 @@ function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
     isrequired[idx] = true
     objs = Set{Union{Symbol,GlobalRef}}()
-    return lines_required!(isrequired, objs, src, edges; kwargs...)
+    return lines_required!(isrequired, src, edges; kwargs...)
 end
 
 """
-    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges;
-                    norequire = ())
+    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; exclude_named_typedefs::Bool=false)
 
 Like `lines_required`, but where `isrequired[idx]` has already been set to `true` for all statements
 that you know you need to evaluate. All other statements should be marked `false` at entry.
 On return, the complete set of required statements will be marked `true`.
 
-`norequire` keyword argument specifies statements (represented as iterator of `Int`s) that
-should _not_ be marked as a requirement.
-For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src, edges)` if you're
-extracting method signatures and not evaluating new definitions.
+Use `exclude_named_typedefs=true` if you're extracting method signatures and not evaluating new definitions.
 """
 function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; kwargs...)
     objs = Set{Union{Symbol,GlobalRef}}()
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
-function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
-    norequire = BitSet()
-    i = 1
-    nstmts = length(src.code)
-    while i <= nstmts
-        stmt = rhs(src.code[i])
-        if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
-            r = typedef_range(src, i)
-            pushall!(norequire, r)
-            i = last(r)+1
-        else
-            i += 1
-        end
-    end
-    return norequire
-end
-
-function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges; norequire = ())
+function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges; exclude_named_typedefs::Bool=false)
     # Do a traveral of "numbered" predecessors
     # We'll mostly use generic graph traversal to discover all the lines we need,
     # but structs are in a bit of a different category (especially on Julia 1.5+).
     # It's easiest to discover these at the beginning.
+    # Moreover, if we're excluding named type definitions, we'll add them to `norequire`
+    # to prevent them from being marked.
     typedef_blocks, typedef_names = UnitRange{Int}[], Symbol[]
-    i = 1
+    norequire = BitSet()
     nstmts = length(src.code)
+    i = 1
     while i <= nstmts
         stmt = rhs(src.code[i])
         if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
@@ -636,6 +618,9 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
             isa(name, Symbol) || @show src i r stmt
             push!(typedef_names, name::Symbol)
             i = last(r)+1
+            if exclude_named_typedefs && !isanonymous_typedef(stmt)
+                pushall!(norequire, r)
+            end
         else
             i += 1
         end
@@ -656,14 +641,12 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     iter = 0
     while changed
         changed = false
-
         # Handle ssa predecessors
         for idx = 1:nstmts
             if isrequired[idx]
                 changed |= add_preds!(isrequired, idx, edges, norequire)
             end
         end
-
         # Handle named dependencies
         for (obj, uses) in edges.byname
             obj ∈ objs && continue
@@ -671,7 +654,6 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                 changed |= add_obj!(isrequired, objs, obj, edges, norequire)
             end
         end
-
         # Add control-flow. For any basic block with an evaluated statement inside it,
         # check to see if the block has any successors, and if so mark that block's exit statement.
         # Likewise, any preceding blocks should have *their* exit statement marked.
@@ -702,7 +684,6 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
                 end
             end
         end
-
         # So far, everything is generic graph traversal. Now we add some domain-specific information.
         # New struct definitions, including their constructors, get spread out over many
         # statements. If we're evaluating any of them, it's important to evaluate *all* of them.
@@ -852,7 +833,7 @@ Mark each line of code with its requirement status.
 function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool})
     nd = ndigits(length(isrequired))
     preprint(::IO) = nothing
-    preprint(io::IO, idx::Int) = (c = isrequired[idx]; printstyled(io, lpad(idx, nd), ' ', c ? "t " : "f "; color = c ? :cyan : :plain))
+    preprint(io::IO, idx::Int) = print(io, lpad(idx, nd), ' ', isrequired[idx] ? "t " : "f ")
     postprint(::IO) = nothing
     postprint(io::IO, idx::Int, bbchanged::Bool) = nothing
 

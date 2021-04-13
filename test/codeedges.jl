@@ -1,6 +1,6 @@
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
-using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs
+using LoweredCodeUtils: callee_matches, istypedef
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
@@ -262,7 +262,7 @@ end
     frame = Frame(ModEval, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src, edges))  # initially mark only the constructor
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; exclude_named_typedefs=true)  # initially mark only the constructor
     bbs = Core.Compiler.compute_basic_blocks(src.code)
     for (iblock, block) in enumerate(bbs.blocks)
         r = LoweredCodeUtils.rng(block)
@@ -301,7 +301,7 @@ end
     src = thk.args[1]
     edges = CodeEdges(src)
     idx = findfirst(stmt->Meta.isexpr(stmt, :method), src.code)
-    lr = lines_required(idx, src, edges; norequire=exclude_named_typedefs(src, edges))
+    lr = lines_required(idx, src, edges; exclude_named_typedefs=true)
     idx = findfirst(stmt->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
     @test lr[idx]
     # but make sure we don't break primitivetype & abstracttype (https://github.com/timholy/Revise.jl/pull/611)
