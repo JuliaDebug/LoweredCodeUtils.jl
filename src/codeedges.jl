@@ -394,7 +394,7 @@ Analyze `src` and determine the chain of dependencies.
 - `edges.preds[i]` lists the preceding statements that statement `i` depends on.
 - `edges.succs[i]` lists the succeeding statements that depend on statement `i`.
 - `edges.byname[v]` returns information about the predecessors, successors, and assignment statements
-  for an object `v::Union{Symbol,GlobalRef}`.
+  for an object `v::$NamedVar`.
 """
 function CodeEdges(src::CodeInfo)
     src.inferred && error("supply lowered but not inferred code")
@@ -557,7 +557,7 @@ function terminal_preds(i::Int, edges::CodeEdges)
 end
 
 """
-    isrequired = lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges)
+    isrequired = lines_required(obj::$NamedVar, src::CodeInfo, edges::CodeEdges)
     isrequired = lines_required(idx::Int,                     src::CodeInfo, edges::CodeEdges)
 
 Determine which lines might need to be executed to evaluate `obj` or the statement indexed by `idx`.
@@ -567,16 +567,16 @@ will end up skipping a subset of such statements, perhaps while repeating others
 
 See also [`lines_required!`](@ref) and [`selective_eval!`](@ref).
 """
-function lines_required(obj::Union{Symbol,GlobalRef}, src::CodeInfo, edges::CodeEdges; kwargs...)
+function lines_required(obj::NamedVar, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
-    objs = Set{Union{Symbol,GlobalRef}}([obj])
+    objs = Set{NamedVar}([obj])
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
 function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
     isrequired[idx] = true
-    objs = Set{Union{Symbol,GlobalRef}}()
+    objs = Set{NamedVar}()
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
@@ -594,7 +594,7 @@ For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src, edges
 extracting method signatures and not evaluating new definitions.
 """
 function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; kwargs...)
-    objs = Set{Union{Symbol,GlobalRef}}()
+    objs = Set{NamedVar}()
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
@@ -616,141 +616,66 @@ function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
 end
 
 function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges; norequire = ())
-    # Do a traveral of "numbered" predecessors
+    # Mark any requested objects (their lines of assignment)
+    objs = add_requests!(isrequired, objs, edges, norequire)
+
+    # Compute basic blocks, which we'll use to make sure we mark necessary control-flow
+    cfg = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
+
     # We'll mostly use generic graph traversal to discover all the lines we need,
     # but structs are in a bit of a different category (especially on Julia 1.5+).
     # It's easiest to discover these at the beginning.
-    typedef_blocks, typedef_names = UnitRange{Int}[], Symbol[]
-    i = 1
-    nstmts = length(src.code)
-    while i <= nstmts
-        stmt = rhs(src.code[i])
-        if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
-            stmt = stmt::Expr
-            r = typedef_range(src, i)
-            push!(typedef_blocks, r)
-            name = stmt.head === :call ? stmt.args[3] : stmt.args[1]
-            if isa(name, QuoteNode)
-                name = name.value
-            end
-            isa(name, Symbol) || @show src i r stmt
-            push!(typedef_names, name::Symbol)
-            i = last(r)+1
-        else
-            i += 1
-        end
-    end
+    typedefs = find_typedefs(src)
 
-    # Mark any requested objects (their lines of assignment)
-    objsnew = Set{Union{Symbol,GlobalRef}}()
-    for obj in objs
-        add_obj!(isrequired, objsnew, obj, edges, norequire)
-    end
-    objs = objsnew
-
-    # Compute basic blocks, which we'll use to make sure we mark necessary control-flow
-    bbs = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
-    nblocks = length(bbs.blocks)
-
-    changed::Bool = true
+    changed = true
     iter = 0
     while changed
         changed = false
 
         # Handle ssa predecessors
-        for idx = 1:nstmts
-            if isrequired[idx]
-                changed |= add_preds!(isrequired, idx, edges, norequire)
-            end
-        end
+        changed |= add_ssa_preds!(isrequired, src, edges, norequire)
 
         # Handle named dependencies
-        for (obj, uses) in edges.byname
-            obj ∈ objs && continue
-            if any(view(isrequired, uses.succs))
-                changed |= add_obj!(isrequired, objs, obj, edges, norequire)
-            end
-        end
+        changed |= add_named_dependencies!(isrequired, edges, objs, norequire)
 
-        # Add control-flow. For any basic block with an evaluated statement inside it,
-        # check to see if the block has any successors, and if so mark that block's exit statement.
-        # Likewise, any preceding blocks should have *their* exit statement marked.
-        for (ibb, bb) in enumerate(bbs.blocks)
-            r = rng(bb)
-            if any(view(isrequired, r))
-                if ibb != nblocks
-                    idxlast = r[end]
-                    idxlast ∈ norequire && continue
-                    changed |= !isrequired[idxlast]
-                    isrequired[idxlast] = true
-                end
-                for ibbp in bb.preds
-                    ibbp > 0 || continue # see Core.Compiler.compute_basic_blocks, near comment re :enter
-                    rpred = rng(bbs.blocks[ibbp])
-                    idxlast = rpred[end]
-                    idxlast ∈ norequire && continue
-                    changed |= !isrequired[idxlast]
-                    isrequired[idxlast] = true
-                end
-                for ibbs in bb.succs
-                    ibbs == nblocks && continue
-                    rpred = rng(bbs.blocks[ibbs])
-                    idxlast = rpred[end]
-                    idxlast ∈ norequire && continue
-                    changed |= !isrequired[idxlast]
-                    isrequired[idxlast] = true
-                end
-            end
-        end
+        # Add control-flow
+        changed |= add_control_flow!(isrequired, cfg, norequire)
 
-        # So far, everything is generic graph traversal. Now we add some domain-specific information.
-        # New struct definitions, including their constructors, get spread out over many
-        # statements. If we're evaluating any of them, it's important to evaluate *all* of them.
-        idx = 1
-        while idx < length(src.code)
-            stmt = src.code[idx]
-            isrequired[idx] || (idx += 1; continue)
-            for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
-                if idx ∈ typedefr
-                    ireq = view(isrequired, typedefr)
-                    if !all(ireq)
-                        changed = true
-                        ireq .= true
-                        # Also mark any by-type constructor(s) associated with this typedef
-                        var = get(edges.byname, typedefn, nothing)
-                        if var !== nothing
-                            for s in var.succs
-                                s ∈ norequire && continue
-                                stmt2 = src.code[s]
-                                if isexpr(stmt2, :method) && (fname = (stmt2::Expr).args[1]; fname === false || fname === nothing)
-                                    isrequired[s] = true
-                                end
-                            end
-                        end
-                    end
-                    idx = last(typedefr) + 1
-                    continue
-                end
-            end
-            # Anonymous functions may not yet include the method definition
-            if isanonymous_typedef(stmt)
-                i = idx + 1
-                while i <= length(src.code) && !ismethod3(src.code[i])
-                    i += 1
-                end
-                if i <= length(src.code) && (src.code[i]::Expr).args[1] == false
-                    tpreds = terminal_preds(i, edges)
-                    if minimum(tpreds) == idx && i ∉ norequire
-                        changed |= !isrequired[i]
-                        isrequired[i] = true
-                    end
-                end
-            end
-            idx += 1
-        end
+        # So far, everything is generic graph traversal. Now we add some domain-specific information
+        changed |= add_typedefs!(isrequired, src, edges, typedefs, norequire)
+
         iter += 1  # just for diagnostics
     end
     return isrequired
+end
+
+function add_requests!(isrequired, objs, edges::CodeEdges, norequire)
+    objsnew = Set{NamedVar}()
+    for obj in objs
+        add_obj!(isrequired, objsnew, obj, edges, norequire)
+    end
+    return objsnew
+end
+
+function add_ssa_preds!(isrequired, src::CodeInfo, edges::CodeEdges, norequire)
+    changed = false
+    for idx = 1:length(src.code)
+        if isrequired[idx]
+            changed |= add_preds!(isrequired, idx, edges, norequire)
+        end
+    end
+    return changed
+end
+
+function add_named_dependencies!(isrequired, edges::CodeEdges, objs, norequire)
+    changed = false
+    for (obj, uses) in edges.byname
+        obj ∈ objs && continue
+        if any(view(isrequired, uses.succs))
+            changed |= add_obj!(isrequired, objs, obj, edges, norequire)
+        end
+    end
+    return changed
 end
 
 function add_preds!(isrequired, idx, edges::CodeEdges, norequire)
@@ -786,6 +711,118 @@ function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
     end
     push!(objs, obj)
     return chngd
+end
+
+# Add control-flow. For any basic block with an evaluated statement inside it,
+# check to see if the block has any successors, and if so mark that block's exit statement.
+# Likewise, any preceding blocks should have *their* exit statement marked.
+function add_control_flow!(isrequired, cfg, norequire)
+    changed = false
+    blocks = cfg.blocks
+    nblocks = length(blocks)
+    for (ibb, bb) in enumerate(blocks)
+        r = rng(bb)
+        if any(view(isrequired, r))
+            if ibb != nblocks
+                idxlast = r[end]
+                idxlast ∈ norequire && continue
+                changed |= !isrequired[idxlast]
+                isrequired[idxlast] = true
+            end
+            for ibbp in bb.preds
+                ibbp > 0 || continue # see Core.Compiler.compute_basic_blocks, near comment re :enter
+                rpred = rng(blocks[ibbp])
+                idxlast = rpred[end]
+                idxlast ∈ norequire && continue
+                changed |= !isrequired[idxlast]
+                isrequired[idxlast] = true
+            end
+            for ibbs in bb.succs
+                ibbs == nblocks && continue
+                rpred = rng(blocks[ibbs])
+                idxlast = rpred[end]
+                idxlast ∈ norequire && continue
+                changed |= !isrequired[idxlast]
+                isrequired[idxlast] = true
+            end
+        end
+    end
+    return changed
+end
+
+# Do a traveral of "numbered" predecessors and find statement ranges and names of type definitions
+function find_typedefs(src::CodeInfo)
+    typedef_blocks, typedef_names = UnitRange{Int}[], Symbol[]
+    i = 1
+    nstmts = length(src.code)
+    while i <= nstmts
+        stmt = rhs(src.code[i])
+        if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
+            stmt = stmt::Expr
+            r = typedef_range(src, i)
+            push!(typedef_blocks, r)
+            name = stmt.head === :call ? stmt.args[3] : stmt.args[1]
+            if isa(name, QuoteNode)
+                name = name.value
+            end
+            isa(name, Symbol) || @show src i r stmt
+            push!(typedef_names, name::Symbol)
+            i = last(r)+1
+        else
+            i += 1
+        end
+    end
+    return typedef_blocks, typedef_names
+end
+
+# New struct definitions, including their constructors, get spread out over many
+# statements. If we're evaluating any of them, it's important to evaluate *all* of them.
+function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blocks, typedef_names), norequire)
+    changed = false
+    stmts = src.code
+    idx = 1
+    while idx < length(stmts)
+        stmt = stmts[idx]
+        isrequired[idx] || (idx += 1; continue)
+        for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
+            if idx ∈ typedefr
+                ireq = view(isrequired, typedefr)
+                if !all(ireq)
+                    changed = true
+                    ireq .= true
+                    # Also mark any by-type constructor(s) associated with this typedef
+                    var = get(edges.byname, typedefn, nothing)
+                    if var !== nothing
+                        for s in var.succs
+                            s ∈ norequire && continue
+                            stmt2 = stmts[s]
+                            if isexpr(stmt2, :method) && (fname = (stmt2::Expr).args[1]; fname === false || fname === nothing)
+                                isrequired[s] = true
+                            end
+                        end
+                    end
+                end
+                idx = last(typedefr) + 1
+                continue
+            end
+        end
+        # Anonymous functions may not yet include the method definition
+        if isanonymous_typedef(stmt)
+            i = idx + 1
+            while i <= length(stmts) && !ismethod3(stmts[i])
+                i += 1
+            end
+            if i <= length(stmts) && (stmts[i]::Expr).args[1] == false
+                tpreds = terminal_preds(i, edges)
+                if minimum(tpreds) == idx && i ∉ norequire
+                    changed |= !isrequired[i]
+                    isrequired[i] = true
+                end
+            end
+        end
+        idx += 1
+    end
+    return changed
 end
 
 """
