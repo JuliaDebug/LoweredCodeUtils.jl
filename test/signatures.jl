@@ -432,3 +432,40 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         end
     end
 end
+
+# https://github.com/timholy/Revise.jl/issues/643
+module Revise643
+
+using LoweredCodeUtils, JuliaInterpreter, Test
+
+function foogr end
+macro deffoogr()
+    gr = GlobalRef(__module__, :foogr) # will be lowered to `GlobalRef`
+    quote
+        $gr(args...) = length(args) + 2
+    end
+end
+let
+    ex = quote
+        @deffoogr
+        @show foogr(1,2,3)
+    end
+    methranges = rename_framemethods!(Frame(@__MODULE__, ex))
+    @test haskey(methranges, :foogr)
+end
+
+function fooqn end
+macro deffooqn()
+    sig = :($(GlobalRef(__module__, :fooqn))(args...)) # will be lowered to `QuoteNode`
+    return Expr(:function, sig, Expr(:block, __source__, :(length(args))))
+end
+let
+    ex = quote
+        @deffooqn
+        @show fooqn(1,2,3)
+    end
+    methranges = rename_framemethods!(Frame(@__MODULE__, ex))
+    @test haskey(methranges, :fooqn)
+end
+
+end
