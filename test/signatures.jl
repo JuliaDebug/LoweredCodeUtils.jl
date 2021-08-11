@@ -438,7 +438,8 @@ module Revise643
 
 using LoweredCodeUtils, JuliaInterpreter, Test
 
-function foogr end
+# make sure to not define `foogr` before macro expansion,
+# otherwise it will be resolved as `QuoteNode`
 macro deffoogr()
     gr = GlobalRef(__module__, :foogr) # will be lowered to `GlobalRef`
     quote
