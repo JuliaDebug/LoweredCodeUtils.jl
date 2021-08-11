@@ -152,7 +152,10 @@ function identify_framemethod_calls(frame)
                 end
             end
         elseif ismethod1(stmt)
-            key = stmt.args[1]::Symbol
+            key = stmt.args[1]
+            key = normalize_defsig(key, frame)
+            key === missing && continue
+            key = key::Symbol
             mi = get(methodinfos, key, nothing)
             if mi === nothing
                 methodinfos[key] = MethodInfo(i)
@@ -161,6 +164,8 @@ function identify_framemethod_calls(frame)
             end
         elseif ismethod3(stmt)
             key = stmt.args[1]
+            key = normalize_defsig(key, frame)
+            key === missing && continue
             if key isa Symbol
                 mi = methodinfos[key]
                 mi.stop = i
@@ -206,6 +211,18 @@ function identify_framemethod_calls(frame)
         mi === nothing || push!(mi.refs, r.second)
     end
     return methodinfos, selfcalls
+end
+
+# try to normalize `def` to `Symbol` representation
+function normalize_defsig(@nospecialize(def), frame::Frame)
+    if def isa QuoteNode
+        parentmodule(def.value) === moduleof(frame) || return false
+        def = nameof(def.value)
+    elseif def isa GlobalRef
+        def.mod === moduleof(frame) || return false
+        def = def.name
+    end
+    return def
 end
 
 function callchain(selfcalls)
@@ -469,8 +486,11 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     end
     ismethod1(stmt) || error("expected method opening, got ", stmt)
     name = stmt.args[1]
+    name = normalize_defsig(name, frame)
     if isa(name, Bool)
         error("not valid for anonymous methods")
+    elseif name === missing
+        error("given invalid definition: $stmt")
     end
     name = name::Symbol
     while true  # methods containing inner methods may need multiple trips through this loop
