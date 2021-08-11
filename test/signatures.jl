@@ -443,7 +443,7 @@ using LoweredCodeUtils, JuliaInterpreter, Test
 macro deffoogr()
     gr = GlobalRef(__module__, :foogr) # will be lowered to `GlobalRef`
     quote
-        $gr(args...) = length(args) + 2
+        $gr(args...) = length(args)
     end
 end
 let
@@ -467,6 +467,37 @@ let
     end
     methranges = rename_framemethods!(Frame(@__MODULE__, ex))
     @test haskey(methranges, :fooqn)
+end
+
+# define methods in other module
+module sandboxgr end
+macro deffoogr_sandbox()
+    gr = GlobalRef(sandboxgr, :foogr_sandbox) # will be lowered to `GlobalRef`
+    quote
+        $gr(args...) = length(args)
+    end
+end
+let
+    ex = quote
+        @deffoogr_sandbox
+        @show sandboxgr.foogr_sandbox(1,2,3)
+    end
+    methranges = rename_framemethods!(Frame(@__MODULE__, ex))
+    @test haskey(methranges, :foogr_sandbox)
+end
+
+module sandboxqn; function fooqn_sandbox end; end
+macro deffooqn_sandbox()
+    sig = :($(GlobalRef(sandboxqn, :fooqn_sandbox))(args...)) # will be lowered to `QuoteNode`
+    return Expr(:function, sig, Expr(:block, __source__, :(length(args))))
+end
+let
+    ex = quote
+        @deffooqn_sandbox
+        @show sandboxqn.fooqn_sandbox(1,2,3)
+    end
+    methranges = rename_framemethods!(Frame(@__MODULE__, ex))
+    @test haskey(methranges, :fooqn_sandbox)
 end
 
 end

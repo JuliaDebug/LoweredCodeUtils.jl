@@ -154,7 +154,6 @@ function identify_framemethod_calls(frame)
         elseif ismethod1(stmt)
             key = stmt.args[1]
             key = normalize_defsig(key, frame)
-            key === missing && continue
             key = key::Symbol
             mi = get(methodinfos, key, nothing)
             if mi === nothing
@@ -165,7 +164,6 @@ function identify_framemethod_calls(frame)
         elseif ismethod3(stmt)
             key = stmt.args[1]
             key = normalize_defsig(key, frame)
-            key === missing && continue
             if key isa Symbol
                 mi = methodinfos[key]
                 mi.stop = i
@@ -216,10 +214,8 @@ end
 # try to normalize `def` to `Symbol` representation
 function normalize_defsig(@nospecialize(def), frame::Frame)
     if def isa QuoteNode
-        parentmodule(def.value) === moduleof(frame) || return false
         def = nameof(def.value)
     elseif def isa GlobalRef
-        def.mod === moduleof(frame) || return false
         def = def.name
     end
     return def
