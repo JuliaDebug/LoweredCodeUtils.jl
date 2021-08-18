@@ -135,10 +135,10 @@ function typedef_range(src::CodeInfo, idx)
             (stmt.head === :global || stmt.head === :return) && break
             if stmt.head === :call
                 if (is_global_ref(stmt.args[1], Core, :_typebody!) ||
-                    isdefined(Core, :_typebody!) && is_quotenode(stmt.args[1], Core._typebody!))
+                    isdefined(Core, :_typebody!) && is_quotenode_egal(stmt.args[1], Core._typebody!))
                     have_typebody = true
                 elseif (is_global_ref(stmt.args[1], Core, :_equiv_typedef) ||
-                    isdefined(Core, :_equiv_typedef) && is_quotenode(stmt.args[1], Core._equiv_typedef))
+                    isdefined(Core, :_equiv_typedef) && is_quotenode_egal(stmt.args[1], Core._equiv_typedef))
                     have_equivtypedef = true
                     # Advance to the type-assignment
                     while iend <= n
