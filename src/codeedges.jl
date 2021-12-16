@@ -100,7 +100,7 @@ const preprinter_sentinel = isdefined(Base.IRShow, :statementidx_lineinfo_printe
 
 if isdefined(Base.IRShow, :show_ir_stmt)
     function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
-        src = JuliaInterpreter.copy_codeinfo(src)
+        src = copy(src)
         JuliaInterpreter.replace_coretypes!(src; rev=true)
         if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
             JuliaInterpreter.reverse_lookup_globalref!(src.code)
@@ -899,7 +899,7 @@ end
 function print_with_code(io::IO, frame::Frame, obj)
     src = frame.framecode.src
     if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
-        src = JuliaInterpreter.copy_codeinfo(src)
+        src = copy(src)
         JuliaInterpreter.reverse_lookup_globalref!(src.code)
     end
     print_with_code(io, src, obj)

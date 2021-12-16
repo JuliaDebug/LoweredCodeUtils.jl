@@ -341,8 +341,8 @@ end
         str = String(take!(io))
         @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
         @test occursin(r"succs: ssas: ∅, slots: \[\d+\], names: ∅;", str)
-        VERSION >= v"1.1" && @test occursin(r"s:\n  preds: ssas: \[\d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str)
-        VERSION >= v"1.1" && @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[:s\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+        @test occursin(r"s:\n  preds: ssas: \[\d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str)
+        @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[:s\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
         LoweredCodeUtils.print_with_code(io, src, cl)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
@@ -357,8 +357,8 @@ end
         edges = CodeEdges(src)
         show(io, edges)
         str = String(take!(io))
-        VERSION >= v"1.1" && @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
-        VERSION >= v"1.1" && @test count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+        @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
+        @test count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
         LoweredCodeUtils.print_with_code(io, src, edges)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
