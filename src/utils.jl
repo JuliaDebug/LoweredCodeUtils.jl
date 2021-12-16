@@ -76,17 +76,10 @@ function isanonymous_typedef(stmt)
     if isa(stmt, CodeInfo)
         src = stmt    # just for naming consistency
         length(src.code) >= 4 || return false
-        if VERSION >= v"1.5.0-DEV.702"
-            stmt = src.code[end-1]
-            (isexpr(stmt, :call) && is_global_ref(stmt.args[1], Core, :_typebody!)) || return false
-            name = (stmt::Expr).args[2]::Symbol
-            return startswith(String(name), "#")
-        else
-            stmt = src.code[end-1]
-            isexpr(stmt, :struct_type) || return false
-            name = (stmt::Expr).args[1]::Symbol
-            return startswith(String(name), "#")
-        end
+        stmt = src.code[end-1]
+        (isexpr(stmt, :call) && is_global_ref(stmt.args[1], Core, :_typebody!)) || return false
+        name = (stmt::Expr).args[2]::Symbol
+        return startswith(String(name), "#")
     end
     return false
 end
@@ -95,7 +88,6 @@ function istypedef(stmt)
     isa(stmt, Expr) || return false
     stmt = rhs(stmt)
     isa(stmt, Expr) || return false
-    stmt.head ∈ structheads && return true
     @static if all(s->isdefined(Core,s), structdecls)
         if stmt.head === :call
             f = stmt.args[1]
@@ -126,7 +118,6 @@ function typedef_range(src::CodeInfo, idx)
         istart -= 1
     end
     istart >= 1 || error("no initial :global found")
-    stmt.head ∈ structheads && return istart:idx
     iend, n = idx, length(src.code)
     have_typebody = have_equivtypedef = false
     while iend <= n

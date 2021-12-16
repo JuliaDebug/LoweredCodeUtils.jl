@@ -406,30 +406,28 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     rename_framemethods!(frame)
 
     # https://github.com/timholy/Revise.jl/issues/550
-    if Base.VERSION >= v"1.4"
-        using Pkg
-        try
-            # we test with the old version of CBinding, let's do it in an isolated environment
-            Pkg.activate(; temp=true)
+    using Pkg
+    try
+        # we test with the old version of CBinding, let's do it in an isolated environment
+        Pkg.activate(; temp=true)
 
-            @info "Adding CBinding to the environment for test purposes"
-            Pkg.add(; name="CBinding", version="0.9.4") # `@cstruct` isn't defined for v1.0 and above
+        @info "Adding CBinding to the environment for test purposes"
+        Pkg.add(; name="CBinding", version="0.9.4") # `@cstruct` isn't defined for v1.0 and above
 
-            m = Module()
-            Core.eval(m, :(using CBinding))
+        m = Module()
+        Core.eval(m, :(using CBinding))
 
-            ex = :(@cstruct S {
-                val::Int8
-            })
-            empty!(signatures)
-            Core.eval(m, ex)
-            frame = Frame(m, ex)
-            rename_framemethods!(frame)
-            pc = methoddefs!(signatures, frame; define=false)
-            @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
-        finally
-            Pkg.activate() # back to the original environment
-        end
+        ex = :(@cstruct S {
+            val::Int8
+        })
+        empty!(signatures)
+        Core.eval(m, ex)
+        frame = Frame(m, ex)
+        rename_framemethods!(frame)
+        pc = methoddefs!(signatures, frame; define=false)
+        @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
+    finally
+        Pkg.activate() # back to the original environment
     end
 end
 
