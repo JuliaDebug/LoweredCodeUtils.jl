@@ -843,13 +843,15 @@ Typically, assignment to a variable binding does not result in an ssa store by J
 """
 function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
     pc = pcexec = pclast = frame.pc
-    while pc !== nothing && !isa(pc, BreakpointRef)
+    while isa(pc, Int)
         frame.pc = pc
         te = isrequired[pc]
-        pclast = pcexec
-        pc = te ? step_expr!(recurse, frame, istoplevel) :
-                  next_or_nothing!(frame)
-        pcexec = te ? pc : pcexec
+        pclast = pcexec::Int
+        if te
+            pcexec = pc = step_expr!(recurse, frame, istoplevel)
+        else
+            pc = next_or_nothing!(frame)
+        end
     end
     isa(pc, BreakpointRef) && return pc
     pcexec = (pcexec === nothing ? pclast : pcexec)::Int
