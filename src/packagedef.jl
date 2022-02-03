@@ -20,33 +20,32 @@ include("codeedges.jl")
 # precompilation
 
 if ccall(:jl_generating_output, Cint, ()) == 1
-    kwdefine = NamedTuple{(:define,),Tuple{Bool}}
-    for ct in (Vector{Any}, Set{Any})
-        f = methoddef!
-        m = which(f, Tuple{Function, ct, Frame, Expr, Int})
-        @assert precompile(Tuple{typeof(f), Function, ct, Frame, Expr, Int})
-        mbody = bodymethod(m)
-        # @assert precompile(Tuple{mbody.sig.parameters[1], Bool, typeof(f), Function, ct, Frame, Expr, Int})
-        @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Function, ct, Frame, Expr, Int})
-        f = methoddefs!
-        @assert precompile(Tuple{typeof(f), Any, ct, Frame})
-        @assert precompile(Tuple{Core.kwftype(typeof(f)), kwdefine, typeof(f), Function, ct, Frame})
+    ex = :(f(x; color::Symbol=:green) = 2x)
+    lwr = Meta.lower(@__MODULE__, ex)
+    frame = Frame(@__MODULE__, lwr.args[1])
+    rename_framemethods!(frame)
+    ex = quote
+        s = 0
+        k = 5
+        for i = 1:3
+            global s, k
+            s += rand(1:5)
+            k += i
+        end
     end
-    @assert precompile(Tuple{typeof(rename_framemethods!), Any, Frame, Dict{Symbol,MethodInfo},
-                             Vector{SelfCall}, Dict{Symbol,Union{Nothing, Bool, Symbol}}})
-    @assert precompile(Tuple{typeof(rename_framemethods!), Any, Frame, Dict{Symbol,MethodInfo},
-                             Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}},
-                             Dict{Symbol,Union{Bool, Symbol}}})
-    @assert precompile(Tuple{typeof(identify_framemethod_calls), Frame})
-    @assert precompile(Tuple{typeof(callchain), Vector{SelfCall}})
-    @assert precompile(Tuple{typeof(callchain), Vector{NamedTuple{(:linetop, :linebody, :callee, :caller),Tuple{Int64,Int64,Symbol,Union{Bool, Symbol}}}}})
-
-    @assert precompile(CodeLinks, (Int, Int))
-    @assert precompile(CodeEdges, (Int,))
-    @assert precompile(CodeEdges, (CodeInfo,))
-    @assert precompile(add_links!, (Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, Any, CodeLinks))
-    @assert precompile(lines_required!, (Vector{Bool}, Set{NamedVar}, CodeInfo, CodeEdges))
-
-    precompile(Tuple{typeof(setindex!),Dict{Union{GlobalRef, Symbol},Links},Links,Symbol})
-    precompile(Tuple{typeof(setindex!),Dict{Union{GlobalRef, Symbol},Variable},Variable,Symbol})
+    lwr = Meta.lower(@__MODULE__, ex)
+    src = lwr.args[1]
+    edges = CodeEdges(src)
+    isrequired = lines_required(:s, src, edges)
+    lines_required(:s, src, edges; norequire=())
+    lines_required(:s, src, edges; norequire=exclude_named_typedefs(src, edges))
+    for isreq in (isrequired, convert(Vector{Bool}, isrequired))
+        lines_required!(isreq, src, edges; norequire=())
+        lines_required!(isreq, src, edges; norequire=exclude_named_typedefs(src, edges))
+    end
+    frame = Frame(@__MODULE__, src)
+    # selective_eval_fromstart!(frame, isrequired, true)
+    precompile(selective_eval_fromstart!, (typeof(frame), typeof(isrequired), Bool))  # can't @eval during precompilation
+    print_with_code(Base.inferencebarrier(devnull)::IO, src, edges)
+    print_with_code(Base.inferencebarrier(devnull)::IO, src, isrequired)
 end
