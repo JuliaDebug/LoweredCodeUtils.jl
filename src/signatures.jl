@@ -609,6 +609,9 @@ function bodymethod(mkw::Method)
                 has_self_call(src, src.code[id]) || return m
             end
             f = stmt.args[end-2]
+            if isa(f, JuliaInterpreter.SSAValue)
+                f = src.code[f.id]
+            end
         else
             has_self_call(src, stmt) || return m
         end

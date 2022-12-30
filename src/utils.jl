@@ -66,6 +66,40 @@ ismethod3(frame::Frame) = ismethod3(pc_expr(frame))
 ismethod(stmt)  = isexpr(stmt, :method)
 ismethod1(stmt) = isexpr(stmt, :method, 1)
 ismethod3(stmt) = isexpr(stmt, :method, 3)
+function ismethod_with_name(src, stmt, target::AbstractString; reentrant::Bool=false)
+    if reentrant
+        name = stmt
+    else
+        ismethod3(stmt) || return false
+        name = stmt.args[1]
+        if name === nothing
+            name = stmt.args[2]
+        end
+    end
+    isdone = false
+    while !isdone
+        if name isa AnySSAValue || name isa AnySlotNumber
+            name = src.code[name.id]
+        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.svec)
+            name = name.args[2]
+        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.apply_type)
+            for arg in name.args[2:end]
+                ismethod_with_name(src, arg, target; reentrant=true) && return true
+            end
+            isdone = true
+        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], UnionAll)
+            for arg in name.args[2:end]
+                ismethod_with_name(src, arg, target; reentrant=true) && return true
+            end
+            isdone = true
+        else
+            isdone = true
+        end
+    end
+    return match(Regex("(^|#)$target(\$|#)"), string(name)) !== nothing
+end
+
+
 
 # anonymous function types are defined in a :thunk expr with a characteristic CodeInfo
 function isanonymous_typedef(stmt)

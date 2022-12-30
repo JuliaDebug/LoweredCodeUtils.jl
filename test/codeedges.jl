@@ -65,7 +65,7 @@ end
     # Check that the result of direct evaluation agrees with selective evaluation
     Core.eval(ModEval, ex)
     isrequired = lines_required(:x, src, edges)
-    @test sum(isrequired) == 1
+    @test sum(isrequired) == 1 + isdefined(Core, :get_binding_type) * 3  # get_binding_type + convert + typeassert
     selective_eval_fromstart!(frame, isrequired)
     @test ModSelective.x === ModEval.x
     @test allmissing(ModSelective, (:y, :z, :a, :b, :k))
@@ -204,7 +204,7 @@ end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:NoParam,false), src, edges)  # initially mark only the constructor
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod_with_name(src, stmt, "NoParam"),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     @test isa(ModSelective.NoParam(), ModSelective.NoParam)
     # Parametric
@@ -216,7 +216,7 @@ end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt)&&stmt.args[1]===:Struct,false), src, edges)  # initially mark only the constructor
+    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod_with_name(src, stmt, "Struct"),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     @test isa(ModSelective.Struct([1,2,3]), ModSelective.Struct{Int})
     # Keyword constructor (this generates :copyast expressions)
@@ -341,15 +341,20 @@ end
         str = String(take!(io))
         @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
         @test occursin(r"succs: ssas: ∅, slots: \[\d+\], names: ∅;", str)
-        @test occursin(r"s:\n  preds: ssas: \[\d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str)
-        @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[:s\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+        @test occursin(r"s:\n  preds: ssas: \[\d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str) ||
+              occursin(r"s:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str)   # with global var inference
+        if Base.VERSION < v"1.8" # changed by global var inference
+            @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[:s\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+        end
         LoweredCodeUtils.print_with_code(io, src, cl)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
             @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
             @test occursin("# see name s", str)
             @test occursin("# see slot 1", str)
-            @test occursin(r"# preds: ssas: \[\d+\], slots: ∅, names: \[:s\]; succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+            if Base.VERSION < v"1.8"  # changed by global var inference
+                @test occursin(r"# preds: ssas: \[\d+\], slots: ∅, names: \[:s\]; succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+            end
         else
             @test occursin("No IR statement printer", str)
         end
@@ -357,13 +362,21 @@ end
         edges = CodeEdges(src)
         show(io, edges)
         str = String(take!(io))
-        @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
-        @test count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+        @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str) ||
+              occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+, \d+\], and used by \[\d+, \d+, \d+\]", str)   # global var inference
+        if Base.VERSION < v"1.9"
+            @test (count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1) ||
+                  (count(occursin("statement $i depends on [4, $(i-1), $(i+4)] and is used by [$(i+2)]", str) for i = 1:length(src.code)) == 1)
+        end
         LoweredCodeUtils.print_with_code(io, src, edges)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
-            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
-            @test count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str) ||
+                  occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+, \d+\], and used by \[\d+, \d+, \d+\]", str)
+            if Base.VERSION < v"1.9"
+                @test (count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1) ||
+                      (count(occursin("preds: [4, $(i-1), $(i+4)], succs: [$(i+2)]", str) for i = 1:length(src.code)) == 1)   # global var inference
+            end
         else
             @test occursin("No IR statement printer", str)
         end
@@ -373,8 +386,12 @@ end
         LoweredCodeUtils.print_with_code(io, frame, edges)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
-            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str)
-            @test count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1
+            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str) ||
+                  occursin(r"s: assigned on \[\d, \d+\], depends on \[\d, \d+\], and used by \[\d+, \d+, \d+\]", str)   # global var inference
+            if Base.VERSION < v"1.9"
+                @test (count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1) ||
+                      (count(occursin("preds: [4, $(i-1), $(i+4)], succs: [$(i+2)]", str) for i = 1:length(src.code)) == 1)  # global var inference
+            end
         else
             @test occursin("No IR statement printer", str)
         end
