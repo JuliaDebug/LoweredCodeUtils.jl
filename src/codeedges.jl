@@ -720,32 +720,37 @@ function add_control_flow!(isrequired, cfg, norequire)
     changed = false
     blocks = cfg.blocks
     nblocks = length(blocks)
-    for (ibb, bb) in enumerate(blocks)
-        r = rng(bb)
-        if any(view(isrequired, r))
-            if ibb != nblocks
-                idxlast = r[end]
-                idxlast ∈ norequire && continue
-                changed |= !isrequired[idxlast]
-                isrequired[idxlast] = true
-            end
-            for ibbp in bb.preds
-                ibbp > 0 || continue # see Core.Compiler.compute_basic_blocks, near comment re :enter
-                rpred = rng(blocks[ibbp])
-                idxlast = rpred[end]
-                idxlast ∈ norequire && continue
-                changed |= !isrequired[idxlast]
-                isrequired[idxlast] = true
-            end
-            for ibbs in bb.succs
-                ibbs == nblocks && continue
-                rpred = rng(blocks[ibbs])
-                idxlast = rpred[end]
-                idxlast ∈ norequire && continue
-                changed |= !isrequired[idxlast]
-                isrequired[idxlast] = true
+    _changed = true
+    while _changed
+        _changed = false
+        for (ibb, bb) in enumerate(blocks)
+            r = rng(bb)
+            if any(view(isrequired, r))
+                if ibb != nblocks
+                    idxlast = r[end]
+                    idxlast ∈ norequire && continue
+                    _changed |= !isrequired[idxlast]
+                    isrequired[idxlast] = true
+                end
+                for ibbp in bb.preds
+                    ibbp > 0 || continue # see Core.Compiler.compute_basic_blocks, near comment re :enter
+                    rpred = rng(blocks[ibbp])
+                    idxlast = rpred[end]
+                    idxlast ∈ norequire && continue
+                    _changed |= !isrequired[idxlast]
+                    isrequired[idxlast] = true
+                end
+                for ibbs in bb.succs
+                    ibbs == nblocks && continue
+                    rpred = rng(blocks[ibbs])
+                    idxlast = rpred[end]
+                    idxlast ∈ norequire && continue
+                    _changed |= !isrequired[idxlast]
+                    isrequired[idxlast] = true
+                end
             end
         end
+        changed |= _changed
     end
     return changed
 end

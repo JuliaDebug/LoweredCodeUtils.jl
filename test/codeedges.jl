@@ -128,6 +128,25 @@ end
     @test ModSelective.a3 === ModEval.a3 == 2
     @test allmissing(ModSelective, (:z3, :x3, :y3))
 
+    ex = quote
+        if Sys.iswindows()
+             const ONLY_ON_WINDOWS = true
+        end
+        c_os = if Sys.iswindows()
+            ONLY_ON_WINDOWS
+        else
+            false
+        end
+    end
+    frame = Frame(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = lines_required(:c_os, src, edges)
+    @test sum(isrequired) >= length(isrequired) - 2
+    selective_eval_fromstart!(frame, isrequired)
+    Core.eval(ModEval, ex)
+    @test ModSelective.c_os === ModEval.c_os == Sys.iswindows()
+
     # Capturing dependencies of an `@eval` statement
     interpT = Expr(:$, :T)   # $T that won't get parsed during file-loading
     ex = quote
