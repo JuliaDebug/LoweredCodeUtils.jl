@@ -44,11 +44,9 @@ function allmissing(mod::Module, names)
     return true
 end
 
-module ModEval
-end
+module ModEval end
 
-module ModSelective
-end
+module ModSelective end
 
 @testset "CodeEdges" begin
     ex = quote
@@ -273,7 +271,6 @@ end
     ex = quote
         struct MyNewType
             x::Int
-
             MyNewType(y::Int) = new(y)
         end
     end
@@ -312,7 +309,6 @@ end
     thk = Meta.lower(Main, quote
         mutable struct A
             x::Int
-
             A(x) = new(f(x))
             f(x) = x^2
         end
