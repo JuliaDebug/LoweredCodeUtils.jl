@@ -480,13 +480,13 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         frame.pc = pc
         return pc, pc3
     end
-    ismethod1(stmt) || error("expected method opening, got ", stmt)
+    ismethod1(stmt) || Base.invokelatest(error, "expected method opening, got ", stmt)
     name = stmt.args[1]
     name = normalize_defsig(name, frame)
     if isa(name, Bool)
         error("not valid for anonymous methods")
     elseif name === missing
-        error("given invalid definition: $stmt")
+        Base.invokelatest(error, "given invalid definition: ", stmt)
     end
     name = name::Symbol
     while true  # methods containing inner methods may need multiple trips through this loop
