@@ -145,8 +145,9 @@ end
 
 Interweave display of code and links.
 
-!!! compat Julia 1.6
+!!! compat "Julia 1.6"
     This function produces dummy output if suitable support is missing in your version of Julia.
+
 """
 function print_with_code(io::IO, src::CodeInfo, cl::CodeLinks)
     function preprint(io::IO)
@@ -502,8 +503,9 @@ end
 
 Interweave display of code and edges.
 
-!!! compat Julia 1.6
+!!! compat "Julia 1.6"
     This function produces dummy output if suitable support is missing in your version of Julia.
+
 """
 function print_with_code(io::IO, src::CodeInfo, edges::CodeEdges)
     function preprint(io::IO)
@@ -890,8 +892,9 @@ end
 
 Mark each line of code with its requirement status.
 
-!!! compat Julia 1.6
+!!! compat "Julia 1.6"
     This function produces dummy output if suitable support is missing in your version of Julia.
+
 """
 function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool})
     nd = ndigits(length(isrequired))
