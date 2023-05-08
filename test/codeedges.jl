@@ -1,3 +1,5 @@
+module codeedges
+
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
 using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs
@@ -493,3 +495,5 @@ end
         check_toplevel_definition_interprete(ex, defs, undefs)
     end
 end
+
+end # module codeedges
