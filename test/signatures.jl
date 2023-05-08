@@ -1,3 +1,5 @@
+module signatures
+
 using LoweredCodeUtils
 using InteractiveUtils
 using JuliaInterpreter
@@ -501,3 +503,5 @@ let
 end
 
 end
+
+end # module signatures
