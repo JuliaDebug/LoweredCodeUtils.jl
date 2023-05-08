@@ -411,12 +411,13 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
 
     # https://github.com/timholy/Revise.jl/issues/550
     using Pkg
+    oldenv = Pkg.project().path
     try
         # we test with the old version of CBinding, let's do it in an isolated environment
-        Pkg.activate(; temp=true)
+        Pkg.activate(; temp=true, io=devnull)
 
         @info "Adding CBinding to the environment for test purposes"
-        Pkg.add(; name="CBinding", version="0.9.4") # `@cstruct` isn't defined for v1.0 and above
+        Pkg.add(; name="CBinding", version="0.9.4", io=devnull) # `@cstruct` isn't defined for v1.0 and above
 
         m = Module()
         Core.eval(m, :(using CBinding))
@@ -431,7 +432,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         pc = methoddefs!(signatures, frame; define=false)
         @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
     finally
-        Pkg.activate() # back to the original environment
+        Pkg.activate(oldenv; io=devnull) # back to the original environment
     end
 end
 
