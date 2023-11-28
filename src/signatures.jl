@@ -165,13 +165,10 @@ function identify_framemethod_calls(frame)
             key = stmt.args[1]
             key = normalize_defsig(key, frame)
             if key isa Symbol
-                if (isdefined(moduleof(frame), key) &&
-                    getfield(moduleof(frame), key) isa Core.MethodTable)
-                    # accept it
-                else
-                    mi = methodinfos[key]
-                    mi.stop = i
-                end
+                # XXX A temporary hack to fix https://github.com/JuliaDebug/LoweredCodeUtils.jl/issues/80
+                #     We should revisit it.
+                mi = get(methodinfos, key, MethodInfo(1))
+                mi.stop = i
             elseif key isa Expr   # this is a module-scoped call. We don't have to worry about these because they are named
                 continue
             end
