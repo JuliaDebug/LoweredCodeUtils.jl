@@ -98,46 +98,32 @@ end
 
 const preprinter_sentinel = isdefined(Base.IRShow, :statementidx_lineinfo_printer) ? 0 : typemin(Int32)
 
-if isdefined(Base.IRShow, :show_ir_stmt)
-    function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
-        src = copy(src)
-        JuliaInterpreter.replace_coretypes!(src; rev=true)
-        if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
-            JuliaInterpreter.reverse_lookup_globalref!(src.code)
-        end
-        io = IOContext(io, :displaysize=>displaysize(io))
-        used = BitSet()
-        cfg = Core.Compiler.compute_basic_blocks(src.code)
-        for stmt in src.code
-            Core.Compiler.scan_ssa_use!(push!, used, stmt)
-        end
-        line_info_preprinter = Base.IRShow.lineinfo_disabled
-        line_info_postprinter = Base.IRShow.default_expr_type_printer
-        preprint(io)
-        bb_idx_prev = bb_idx = 1
-        for idx = 1:length(src.code)
-            preprint(io, idx)
-            bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
-            postprint(io, idx, bb_idx != bb_idx_prev)
-            bb_idx_prev = bb_idx
-        end
-        max_bb_idx_size = ndigits(length(cfg.blocks))
-        line_info_preprinter(io, " "^(max_bb_idx_size + 2), preprinter_sentinel)
-        postprint(io)
-        return nothing
+function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
+    src = copy(src)
+    JuliaInterpreter.replace_coretypes!(src; rev=true)
+    if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
+        JuliaInterpreter.reverse_lookup_globalref!(src.code)
     end
-else
-    function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
-        println(io, "No IR statement printer available on this version of Julia, just aligning statements.")
-        preprint(io)
-        for idx = 1:length(src.code)
-            preprint(io, idx)
-            print(io, src.code[idx])
-            println(io)
-            postprint(io, idx, false)
-        end
-        postprint(io)
+    io = IOContext(io, :displaysize=>displaysize(io))
+    used = BitSet()
+    cfg = Core.Compiler.compute_basic_blocks(src.code)
+    for stmt in src.code
+        Core.Compiler.scan_ssa_use!(push!, used, stmt)
     end
+    line_info_preprinter = Base.IRShow.lineinfo_disabled
+    line_info_postprinter = Base.IRShow.default_expr_type_printer
+    preprint(io)
+    bb_idx_prev = bb_idx = 1
+    for idx = 1:length(src.code)
+        preprint(io, idx)
+        bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
+        postprint(io, idx, bb_idx != bb_idx_prev)
+        bb_idx_prev = bb_idx
+    end
+    max_bb_idx_size = ndigits(length(cfg.blocks))
+    line_info_preprinter(io, " "^(max_bb_idx_size + 2), preprinter_sentinel)
+    postprint(io)
+    return nothing
 end
 
 """
