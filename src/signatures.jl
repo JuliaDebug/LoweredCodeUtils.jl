@@ -143,7 +143,7 @@ function identify_framemethod_calls(frame)
             if length(tsrc.code) == 1
                 tstmt = tsrc.code[1]
                 if is_return(tstmt)
-                    tex = JuliaInterpreter.get_return_node(tstmt)
+                    tex = tstmt.val
                     if isa(tex, Expr)
                         if tex.head === :method && (methname = tex.args[1]; isa(methname, Symbol))
                             push!(refs, methname=>i)
@@ -165,8 +165,13 @@ function identify_framemethod_calls(frame)
             key = stmt.args[1]
             key = normalize_defsig(key, frame)
             if key isa Symbol
-                mi = methodinfos[key]
-                mi.stop = i
+                if (isdefined(moduleof(frame), key) &&
+                    getfield(moduleof(frame), key) isa Core.MethodTable)
+                    # accept it
+                else
+                    mi = methodinfos[key]
+                    mi.stop = i
+                end
             elseif key isa Expr   # this is a module-scoped call. We don't have to worry about these because they are named
                 continue
             end
