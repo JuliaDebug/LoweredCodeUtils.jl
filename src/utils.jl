@@ -165,7 +165,7 @@ function typedef_range(src::CodeInfo, idx)
     while iend <= n
         stmt = src.code[iend]
         if isa(stmt, Expr)
-            (stmt.head === :global || stmt.head === :return) && break
+            stmt.head === :global && break
             if stmt.head === :call
                 if (is_global_ref(stmt.args[1], Core, :_typebody!) ||
                     isdefined(Core, :_typebody!) && is_quotenode_egal(stmt.args[1], Core._typebody!))
