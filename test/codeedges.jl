@@ -97,12 +97,13 @@ module ModSelective end
             y2 = 7
             a2 = 2
         end
+        a2
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = lines_required(:a2, src, edges)
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     Core.eval(ModEval, ex)
     @test ModSelective.a2 === ModEval.a2 == 1
     @test allmissing(ModSelective, (:z2, :x2, :y2))
@@ -294,7 +295,7 @@ module ModSelective end
     # https://github.com/timholy/Revise.jl/issues/538
     thk = Meta.lower(ModEval, quote
         try
-            global function v1(x::Float32)
+            global function revise538(x::Float32)
                 println("F32")
             end
         catch e
@@ -303,9 +304,9 @@ module ModSelective end
     end)
     src = thk.args[1]
     edges = CodeEdges(src)
-    lr = lines_required(:v1, src, edges)
-    idx = findfirst(stmt->Meta.isexpr(stmt, :leave), src.code)
-    @test lr[idx]
+    lr = lines_required(:revise538, src, edges)
+    selective_eval_fromstart!(Frame(ModEval, src), lr, #=istoplevel=#true)
+    @test isdefined(ModEval, :revise538) && length(methods(ModEval.revise538, (Float32,))) == 1
 
     # https://github.com/timholy/Revise.jl/issues/599
     thk = Meta.lower(Main, quote
@@ -426,7 +427,7 @@ end
 
         isrq = lines_required!(istypedef.(stmts), src, edges)
         frame = Frame(m, src)
-        selective_eval_fromstart!(frame, isrq, #= toplevel =# true)
+        selective_eval_fromstart!(frame, isrq, #=toplevel=#true)
 
         for def in defs; @test isdefined(m, def); end
         for undef in undefs; @test !isdefined(m, undef); end
