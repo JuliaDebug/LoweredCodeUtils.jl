@@ -99,8 +99,6 @@ function ismethod_with_name(src, stmt, target::AbstractString; reentrant::Bool=f
     return match(Regex("(^|#)$target(\$|#)"), string(name)) !== nothing
 end
 
-
-
 # anonymous function types are defined in a :thunk expr with a characteristic CodeInfo
 function isanonymous_typedef(stmt)
     if isa(stmt, Expr)
