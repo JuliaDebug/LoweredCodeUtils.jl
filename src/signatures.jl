@@ -43,8 +43,7 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
         if isanonymous_typedef(stmt)
             lastpc = pc = step_through_methoddef(recurse, frame, stmt)   # define an anonymous function
-        elseif isexpr(stmt, :call) && (q = (stmt::Expr).args[1]; isa(q, QuoteNode) && q.value === Core.Typeof) &&
-               (sym = (stmt::Expr).args[2]; isa(sym, Symbol) && !isdefined(mod, sym))
+        elseif is_Typeof_for_anonymous_methoddef(stmt, frame.framecode.src.code, mod)
             return nothing, pc
         else
             lastpc = pc
@@ -60,6 +59,19 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
 end
 signature(@nospecialize(recurse), frame::Frame, pc) = signature(recurse, frame, pc_expr(frame, pc), pc)
 signature(frame::Frame, pc) = signature(finish_and_return!, frame, pc)
+
+function is_Typeof_for_anonymous_methoddef(@nospecialize(stmt), code::Vector{Any}, mod::Module)
+    isexpr(stmt, :call) || return false
+    f = stmt.args[1]
+    isa(f, QuoteNode) || return false
+    f.value === Core.Typeof || return false
+    arg1 = stmt.args[2]
+    if isa(arg1, SSAValue)
+        arg1 = code[arg1.id]
+    end
+    arg1 isa Symbol || return false
+    return !isdefined(mod, arg1)
+end
 
 function minid(@nospecialize(node), stmts, id)
     if isa(node, SSAValue)
@@ -262,7 +274,7 @@ function set_to_running_name!(@nospecialize(recurse), replacements, frame, metho
     replacements[callee] = cname
     mi = methodinfos[cname] = methodinfos[callee]
     src = frame.framecode.src
-    replacename!(src.code[mi.start:mi.stop], callee=>cname)        # the method itself
+    replacename!(@view(src.code[mi.start:mi.stop]), callee=>cname) # the method itself
     for r in mi.refs                                               # the references
         replacename!((src.code[r])::Expr, callee=>cname)
     end
@@ -365,7 +377,7 @@ end
 
 replacename!(src::CodeInfo, pr) = replacename!(src.code, pr)
 
-function replacename!(args::Vector{Any}, pr)
+function replacename!(args::AbstractVector, pr)
     oldname, newname = pr
     for i = 1:length(args)
         a = args[i]
@@ -377,6 +389,9 @@ function replacename!(args::Vector{Any}, pr)
             args[i] = QuoteNode(newname)
         elseif isa(a, Vector{Any})
             replacename!(a, pr)
+        elseif isa(a, Core.ReturnNode) && isdefined(a, :val) && a.val isa Expr
+            # there is something like `ReturnNode(Expr(:method, Symbol(...)))`
+            replacename!(a.val::Expr, pr)
         elseif a === oldname
             args[i] = newname
         end
