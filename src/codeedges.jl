@@ -633,6 +633,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 
         # So far, everything is generic graph traversal. Now we add some domain-specific information
         changed |= add_typedefs!(isrequired, src, edges, typedefs, norequire)
+        changed |= add_inplace!(isrequired, src, edges, norequire)
 
         iter += 1  # just for diagnostics
     end
@@ -869,6 +870,30 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
             end
         end
         idx += 1
+    end
+    return changed
+end
+
+# For arrays, add any `push!`, `pop!`, `empty!` or `setindex!` statements
+# This is needed for the "Modify @enum" test in Revise
+function add_inplace!(isrequired, src, edges, norequire)
+    changed = false
+    for (i, isreq) in pairs(isrequired)
+        isreq || continue
+        for j in edges.succs[i]
+            j ∈ norequire && continue
+            stmt = src.code[j]
+            if isexpr(stmt, :call) && length(stmt.args) >= 2
+                arg = stmt.args[2]
+                if @isssa(arg) && arg.id == i
+                    fname = stmt.args[1]
+                    if is_quotenode_egal(fname, Base.push!) || is_quotenode_egal(fname, Base.pop!) || is_quotenode_egal(fname, Base.empty!) || is_quotenode_egal(fname, Base.setindex!)
+                        changed |= !isrequired[j]
+                        isrequired[j] = true
+                    end
+                end
+            end
+        end
     end
     return changed
 end
