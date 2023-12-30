@@ -609,6 +609,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 
     # Compute basic blocks, which we'll use to make sure we mark necessary control-flow
     cfg = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
+    paths = enumerate_paths(cfg)
 
     # We'll mostly use generic graph traversal to discover all the lines we need,
     # but structs are in a bit of a different category (especially on Julia 1.5+).
@@ -627,7 +628,8 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         changed |= add_named_dependencies!(isrequired, edges, objs, norequire)
 
         # Add control-flow
-        changed |= add_control_flow!(isrequired, cfg, norequire)
+        changed |= add_loops!(isrequired, cfg)
+        changed |= add_control_flow!(isrequired, cfg, paths)
 
         # So far, everything is generic graph traversal. Now we add some domain-specific information
         changed |= add_typedefs!(isrequired, src, edges, typedefs, norequire)
@@ -701,40 +703,93 @@ function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
     return chngd
 end
 
-# Add control-flow. For any basic block with an evaluated statement inside it,
-# check to see if the block has any successors, and if so mark that block's exit statement.
-# Likewise, any preceding blocks should have *their* exit statement marked.
-function add_control_flow!(isrequired, cfg, norequire)
+## Add control-flow
+
+struct Path
+    path::Vector{Int}
+    visited::BitSet
+end
+Path() = Path(Int[], BitSet())
+Path(i::Int) = Path([i], BitSet([i]))
+Path(path::Path) = copy(path)
+Base.copy(path::Path) = Path(copy(path.path), copy(path.visited))
+Base.in(node::Int, path::Path) = node ∈ path.visited
+Base.push!(path::Path, node::Int) = (push!(path.path, node); push!(path.visited, node); return path)
+
+# Mark loops that contain evaluated statements
+function add_loops!(isrequired, cfg)
     changed = false
+    for (ibb, bb) in enumerate(cfg.blocks)
+        needed = false
+        for ibbp in bb.preds
+            # Is there a backwards-pointing predecessor, and if so are there any required statements between the two?
+            ibbp > ibb || continue   # not a loop-block predecessor
+            r, rp = rng(bb), rng(cfg.blocks[ibbp])
+            r = first(r):first(rp)-1
+            needed |= any(view(isrequired, r))
+        end
+        if needed
+            # Mark the final statement of all predecessors
+            for ibbp in bb.preds
+                rp = rng(cfg.blocks[ibbp])
+                changed |= !isrequired[last(rp)]
+                isrequired[last(rp)] = true
+            end
+        end
+    end
+    return changed
+end
+
+enumerate_paths(cfg) = enumerate_paths!(Path[], cfg, Path(1))
+function enumerate_paths!(paths, cfg, path)
+    bb = cfg.blocks[path.path[end]]
+    if isempty(bb.succs)
+        push!(paths, copy(path))
+        return paths
+    end
+    for ibbs in bb.succs
+        if ibbs ∈ path
+            push!(paths, push!(copy(path), ibbs))   # close the loop
+            continue
+        end
+        enumerate_paths!(paths, cfg, push!(copy(path), ibbs))
+    end
+    return paths
+end
+
+# Mark exits of blocks that bifurcate execution paths in ways that matter for required statements
+function add_control_flow!(isrequired, cfg, paths::AbstractVector{Path})
+    withnode, withoutnode, shared = BitSet(), BitSet(), BitSet()
+    changed, _changed = false, true
     blocks = cfg.blocks
     nblocks = length(blocks)
-    _changed = true
     while _changed
         _changed = false
         for (ibb, bb) in enumerate(blocks)
             r = rng(bb)
             if any(view(isrequired, r))
-                if ibb != nblocks
+                # Check if the exit of this block is a GotoNode
+                if length(bb.succs) == 1
                     idxlast = r[end]
-                    idxlast ∈ norequire && continue
                     _changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
-                for ibbp in bb.preds
-                    ibbp > 0 || continue # see Core.Compiler.compute_basic_blocks, near comment re :enter
-                    rpred = rng(blocks[ibbp])
-                    idxlast = rpred[end]
-                    idxlast ∈ norequire && continue
-                    _changed |= !isrequired[idxlast]
-                    isrequired[idxlast] = true
+                empty!(withnode)
+                empty!(withoutnode)
+                for path in paths
+                    union!(ibb ∈ path ? withnode : withoutnode, path.visited)
                 end
-                for ibbs in bb.succs
-                    ibbs == nblocks && continue
-                    rpred = rng(blocks[ibbs])
-                    idxlast = rpred[end]
-                    idxlast ∈ norequire && continue
-                    _changed |= !isrequired[idxlast]
-                    isrequired[idxlast] = true
+                empty!(shared)
+                union!(shared, withnode)
+                intersect!(shared, withoutnode)
+                for icfbb in shared
+                    cfbb = blocks[icfbb]
+                    if any(∉(shared), cfbb.succs)
+                        rcfbb = rng(blocks[icfbb])
+                        idxlast = rcfbb[end]
+                        _changed |= !isrequired[idxlast]
+                        isrequired[idxlast] = true
+                    end
                 end
             end
         end
@@ -850,7 +905,7 @@ function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::Abstr
     pcexec = (pcexec === nothing ? pclast : pcexec)::Int
     frame.pc = pcexec
     node = pc_expr(frame)
-    is_return(node) && return lookup_return(frame, node)
+    is_return(node) && return isrequired[pcexec] ? lookup_return(frame, node) : nothing
     isassigned(frame.framedata.ssavalues, pcexec) && return frame.framedata.ssavalues[pcexec]
     return nothing
 end
