@@ -506,6 +506,19 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         Base.invokelatest(error, "given invalid definition: ", stmt)
     end
     name = name::Symbol
+    # Is there any 3-arg method definition with the same name? If not, avoid risk of executing code that
+    # we shouldn't (fixes https://github.com/timholy/Revise.jl/issues/758)
+    found = false
+    for i = pc+1:length(framecode.src.code)
+        newstmt = framecode.src.code[i]
+        if ismethod3(newstmt)
+            if ismethod_with_name(framecode.src, newstmt, string(name))
+                found = true
+                break
+            end
+        end
+    end
+    found || return nothing
     while true  # methods containing inner methods may need multiple trips through this loop
         sigt, pc = signature(recurse, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
