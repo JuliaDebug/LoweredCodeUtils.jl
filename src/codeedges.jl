@@ -877,6 +877,16 @@ end
 # For arrays, add any `push!`, `pop!`, `empty!` or `setindex!` statements
 # This is needed for the "Modify @enum" test in Revise
 function add_inplace!(isrequired, src, edges, norequire)
+    function mark_if_inplace(stmt, j)
+        _changed = false
+        fname = stmt.args[1]
+        if is_quotenode_egal(fname, Base.push!) || is_quotenode_egal(fname, Base.pop!) || is_quotenode_egal(fname, Base.empty!) || is_quotenode_egal(fname, Base.setindex!)
+            _changed = !isrequired[j]
+            isrequired[j] = true
+        end
+        return _changed
+    end
+
     changed = false
     for (i, isreq) in pairs(isrequired)
         isreq || continue
@@ -886,10 +896,20 @@ function add_inplace!(isrequired, src, edges, norequire)
             if isexpr(stmt, :call) && length(stmt.args) >= 2
                 arg = stmt.args[2]
                 if @isssa(arg) && arg.id == i
-                    fname = stmt.args[1]
-                    if is_quotenode_egal(fname, Base.push!) || is_quotenode_egal(fname, Base.pop!) || is_quotenode_egal(fname, Base.empty!) || is_quotenode_egal(fname, Base.setindex!)
-                        changed |= !isrequired[j]
-                        isrequired[j] = true
+                    changed |= mark_if_inplace(stmt, j)
+                elseif @issslotnum(arg)
+                    id = arg.id
+                    # Check to see if we use this slot
+                    for k in edges.preds[j]
+                        isrequired[k] || continue
+                        predstmt = src.code[k]
+                        if isexpr(predstmt, :(=))
+                            lhs = predstmt.args[1]
+                            if @issslotnum(lhs) && lhs.id == id
+                                changed |= mark_if_inplace(stmt, j)
+                                break
+                            end
+                        end
                     end
                 end
             end
