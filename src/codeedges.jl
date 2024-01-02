@@ -769,8 +769,8 @@ function add_control_flow!(isrequired, cfg, paths::AbstractVector{Path})
         for (ibb, bb) in enumerate(blocks)
             r = rng(bb)
             if any(view(isrequired, r))
-                # Check if the exit of this block is a GotoNode
-                if length(bb.succs) == 1
+                # Check if the exit of this block is a GotoNode or `return`
+                if length(bb.succs) < 2
                     idxlast = r[end]
                     _changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
