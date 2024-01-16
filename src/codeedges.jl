@@ -609,7 +609,8 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 
     # Compute basic blocks, which we'll use to make sure we mark necessary control-flow
     cfg = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
-    paths = enumerate_paths(cfg)
+    domtree = Core.Compiler.construct_domtree(cfg.blocks)
+    postdomtree = Core.Compiler.construct_postdomtree(cfg.blocks)
 
     # We'll mostly use generic graph traversal to discover all the lines we need,
     # but structs are in a bit of a different category (especially on Julia 1.5+).
@@ -629,7 +630,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 
         # Add control-flow
         changed |= add_loops!(isrequired, cfg)
-        changed |= add_control_flow!(isrequired, cfg, paths)
+        changed |= add_control_flow!(isrequired, cfg, domtree, postdomtree)
 
         # So far, everything is generic graph traversal. Now we add some domain-specific information
         changed |= add_typedefs!(isrequired, src, edges, typedefs, norequire)
@@ -741,26 +742,7 @@ function add_loops!(isrequired, cfg)
     return changed
 end
 
-enumerate_paths(cfg) = enumerate_paths!(Path[], cfg, Path(1))
-function enumerate_paths!(paths, cfg, path)
-    bb = cfg.blocks[path.path[end]]
-    if isempty(bb.succs)
-        push!(paths, copy(path))
-        return paths
-    end
-    for ibbs in bb.succs
-        if ibbs ∈ path
-            push!(paths, push!(copy(path), ibbs))   # close the loop
-            continue
-        end
-        enumerate_paths!(paths, cfg, push!(copy(path), ibbs))
-    end
-    return paths
-end
-
-# Mark exits of blocks that bifurcate execution paths in ways that matter for required statements
-function add_control_flow!(isrequired, cfg, paths::AbstractVector{Path})
-    withnode, withoutnode, shared = BitSet(), BitSet(), BitSet()
+function add_control_flow!(isrequired, cfg, domtree, postdomtree)
     changed, _changed = false, true
     blocks = cfg.blocks
     nblocks = length(blocks)
@@ -775,22 +757,21 @@ function add_control_flow!(isrequired, cfg, paths::AbstractVector{Path})
                     _changed |= !isrequired[idxlast]
                     isrequired[idxlast] = true
                 end
-                empty!(withnode)
-                empty!(withoutnode)
-                for path in paths
-                    union!(ibb ∈ path ? withnode : withoutnode, path.visited)
-                end
-                empty!(shared)
-                union!(shared, withnode)
-                intersect!(shared, withoutnode)
-                for icfbb in shared
-                    cfbb = blocks[icfbb]
-                    if any(∉(shared), cfbb.succs)
-                        rcfbb = rng(blocks[icfbb])
-                        idxlast = rcfbb[end]
-                        _changed |= !isrequired[idxlast]
-                        isrequired[idxlast] = true
+                # Walk up the dominators
+                jbb = ibb
+                while jbb != 1
+                    dbb = domtree.idoms_bb[jbb]
+                    # Check the successors; if jbb doesn't post-dominate, mark the last statement
+                    for s in blocks[dbb].succs
+                        if !Core.Compiler.postdominates(postdomtree, jbb, s)
+                            rdbb = rng(blocks[dbb])
+                            idxlast = rdbb[end]
+                            _changed |= !isrequired[idxlast]
+                            isrequired[idxlast] = true
+                            break
+                        end
                     end
+                    jbb = dbb
                 end
             end
         end
