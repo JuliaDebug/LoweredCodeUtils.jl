@@ -707,17 +707,6 @@ end
 
 ## Add control-flow
 
-struct Path
-    path::Vector{Int}
-    visited::BitSet
-end
-Path() = Path(Int[], BitSet())
-Path(i::Int) = Path([i], BitSet([i]))
-Path(path::Path) = copy(path)
-Base.copy(path::Path) = Path(copy(path.path), copy(path.visited))
-Base.in(node::Int, path::Path) = node ∈ path.visited
-Base.push!(path::Path, node::Int) = (push!(path.path, node); push!(path.visited, node); return path)
-
 # Mark loops that contain evaluated statements
 function add_loops!(isrequired, cfg)
     changed = false
@@ -751,27 +740,33 @@ function add_control_flow!(isrequired, cfg, domtree, postdomtree)
         for (ibb, bb) in enumerate(blocks)
             r = rng(bb)
             if any(view(isrequired, r))
-                # Check if the exit of this block is a GotoNode or `return`
-                if length(bb.succs) < 2 && ibb < nblocks
-                    idxlast = r[end]
-                    _changed |= !isrequired[idxlast]
-                    isrequired[idxlast] = true
-                end
                 # Walk up the dominators
                 jbb = ibb
                 while jbb != 1
-                    dbb = domtree.idoms_bb[jbb]
+                    jdbb = domtree.idoms_bb[jbb]
+                    dbb = blocks[jdbb]
                     # Check the successors; if jbb doesn't post-dominate, mark the last statement
-                    for s in blocks[dbb].succs
+                    for s in dbb.succs
                         if !postdominates(postdomtree, jbb, s)
-                            rdbb = rng(blocks[dbb])
-                            idxlast = rdbb[end]
+                            idxlast = rng(dbb)[end]
                             _changed |= !isrequired[idxlast]
                             isrequired[idxlast] = true
                             break
                         end
                     end
-                    jbb = dbb
+                    jbb = jdbb
+                end
+                # Walk down the post-dominators, including self
+                jbb = ibb
+                while jbb != 0 && jbb < nblocks
+                    pdbb = blocks[jbb]
+                    # Check if the exit of this block is a GotoNode or `return`
+                    if length(pdbb.succs) < 2
+                        idxlast = rng(pdbb)[end]
+                        _changed |= !isrequired[idxlast]
+                        isrequired[idxlast] = true
+                    end
+                    jbb = postdomtree.idoms_bb[jbb]
                 end
             end
         end
