@@ -609,8 +609,8 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 
     # Compute basic blocks, which we'll use to make sure we mark necessary control-flow
     cfg = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
-    domtree = Core.Compiler.construct_domtree(cfg.blocks)
-    postdomtree = Core.Compiler.construct_postdomtree(cfg.blocks)
+    domtree = construct_domtree(cfg.blocks)
+    postdomtree = construct_postdomtree(cfg.blocks)
 
     # We'll mostly use generic graph traversal to discover all the lines we need,
     # but structs are in a bit of a different category (especially on Julia 1.5+).
@@ -763,7 +763,7 @@ function add_control_flow!(isrequired, cfg, domtree, postdomtree)
                     dbb = domtree.idoms_bb[jbb]
                     # Check the successors; if jbb doesn't post-dominate, mark the last statement
                     for s in blocks[dbb].succs
-                        if !Core.Compiler.postdominates(postdomtree, jbb, s)
+                        if !postdominates(postdomtree, jbb, s)
                             rdbb = rng(blocks[dbb])
                             idxlast = rdbb[end]
                             _changed |= !isrequired[idxlast]

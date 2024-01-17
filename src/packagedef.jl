@@ -16,6 +16,13 @@ export CodeEdges, lines_required, lines_required!, selective_eval!, selective_ev
 include("utils.jl")
 include("signatures.jl")
 include("codeedges.jl")
+if Base.VERSION < v"1.10"
+    include("domtree.jl")
+else
+    const construct_domtree = Core.Compiler.construct_domtree
+    const construct_postdomtree = Core.Compiler.construct_postdomtree
+    const postdominates = Core.Compiler.postdominates
+end
 
 # precompilation
 
