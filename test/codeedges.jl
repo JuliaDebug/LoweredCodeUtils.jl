@@ -216,6 +216,23 @@ module ModSelective end
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
 
+    # Final block is not a `return`
+    ex = quote
+        x = 1
+        y = 7
+        @label loop
+        x += 1
+        x < 5 || return y
+        @goto loop
+    end
+    frame = Frame(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(src)
+    isrequired = lines_required(:x, src, edges)
+    selective_eval_fromstart!(frame, isrequired, true)
+    @test ModSelective.x == 5
+    @test !isdefined(ModSelective, :y)
+
     # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
     frame = Frame(ModSelective, ex)
