@@ -384,7 +384,6 @@ Analyze `src` and determine the chain of dependencies.
   for an object `v::$NamedVar`.
 """
 function CodeEdges(src::CodeInfo)
-    src.inferred && error("supply lowered but not inferred code")
     cl = CodeLinks(src)
     CodeEdges(src, cl)
 end
