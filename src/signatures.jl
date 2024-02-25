@@ -611,45 +611,58 @@ end
 Return the "body method" for a method `m`. `mbody` contains the code of the function body
 when `m` was defined.
 """
-function bodymethod(mkw::Method)
-    m = mkw
-    local src
-    while true
-        framecode = JuliaInterpreter.get_framecode(m)
-        fakeargs = Any[nothing for i = 1:(framecode.scope::Method).nargs]
-        frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
-        src = framecode.src
-        (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
-        # Build the optional arg, so we can get its type
-        pc = frame.pc
-        while pc < length(src.code) - 1
-            pc = step_expr!(frame)
+function bodymethod end
+
+if Base.VERSION < v"1.10"
+    function bodymethod(mkw::Method)
+        m = mkw
+        local src
+        while true
+            framecode = JuliaInterpreter.get_framecode(m)
+            fakeargs = Any[nothing for i = 1:(framecode.scope::Method).nargs]
+            frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
+            src = framecode.src
+            (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
+            # Build the optional arg, so we can get its type
+            pc = frame.pc
+            while pc < length(src.code) - 1
+                pc = step_expr!(frame)
+            end
+            val = pc > 1 ? frame.framedata.ssavalues[pc-1] : (src.code[1]::Expr).args[end]
+            sig = Tuple{(Base.unwrap_unionall(m.sig)::DataType).parameters..., typeof(val)}
+            m = whichtt(sig)
         end
-        val = pc > 1 ? frame.framedata.ssavalues[pc-1] : (src.code[1]::Expr).args[end]
-        sig = Tuple{(Base.unwrap_unionall(m.sig)::DataType).parameters..., typeof(val)}
-        m = whichtt(sig)
+        length(src.code) > 1 || return m
+        stmt = src.code[end-1]
+        if isexpr(stmt, :call) && (f = (stmt::Expr).args[1]; isa(f, QuoteNode))
+            if f.value === (isdefined(Core, :_apply_iterate) ? Core._apply_iterate : Core._apply)
+                ssaref = stmt.args[end-1]
+                if isa(ssaref, JuliaInterpreter.SSAValue)
+                    id = ssaref.id
+                    has_self_call(src, src.code[id]) || return m
+                end
+                f = stmt.args[end-2]
+                if isa(f, JuliaInterpreter.SSAValue)
+                    f = src.code[f.id]
+                end
+            else
+                has_self_call(src, stmt) || return m
+            end
+            f = f.value
+            mths = methods(f)
+            if length(mths) == 1
+                return first(mths)
+            end
+        end
+        return m
     end
-    length(src.code) > 1 || return m
-    stmt = src.code[end-1]
-    if isexpr(stmt, :call) && (f = (stmt::Expr).args[1]; isa(f, QuoteNode))
-        if f.value === (isdefined(Core, :_apply_iterate) ? Core._apply_iterate : Core._apply)
-            ssaref = stmt.args[end-1]
-            if isa(ssaref, JuliaInterpreter.SSAValue)
-                id = ssaref.id
-                has_self_call(src, src.code[id]) || return m
-            end
-            f = stmt.args[end-2]
-            if isa(f, JuliaInterpreter.SSAValue)
-                f = src.code[f.id]
-            end
-        else
-            has_self_call(src, stmt) || return m
-        end
-        f = f.value
+else
+    function bodymethod(mkw::Method)
+        f = Base.bodyfunction(mkw)
         mths = methods(f)
         if length(mths) == 1
             return first(mths)
         end
+        return mkw
     end
-    return m
 end
