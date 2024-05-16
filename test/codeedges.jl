@@ -439,6 +439,21 @@ module ModSelective end
         else
             @test occursin("No IR statement printer", str)
         end
+
+        # display slot names
+        ex = :(let
+            s = 0.0
+            for i = 1:5
+                s += rand()
+            end
+            return s
+        end)
+        lwr = Meta.lower(Main, ex)
+        src = lwr.args[1]
+        LoweredCodeUtils.print_with_code(io, src, trues(length(src.code)))
+        str = String(take!(io))
+        @test count("s = ", str) == 2
+        @test count("i = ", str) == 1
     end
 end
 
