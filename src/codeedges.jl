@@ -104,7 +104,9 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
     if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
         JuliaInterpreter.reverse_lookup_globalref!(src.code)
     end
-    io = IOContext(io, :displaysize=>displaysize(io))
+    io = IOContext(io,
+        :displaysize=>displaysize(io),
+        :SOURCE_SLOTNAMES => Base.sourceinfo_slotnames(src))
     used = BitSet()
     cfg = Core.Compiler.compute_basic_blocks(src.code)
     for stmt in src.code
