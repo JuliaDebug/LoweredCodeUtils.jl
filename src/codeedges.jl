@@ -857,7 +857,10 @@ function add_inplace!(isrequired, src, edges, norequire)
     function mark_if_inplace(stmt, j)
         _changed = false
         fname = stmt.args[1]
-        if is_quotenode_egal(fname, Base.push!) || is_quotenode_egal(fname, Base.pop!) || is_quotenode_egal(fname, Base.empty!) || is_quotenode_egal(fname, Base.setindex!)
+        if (callee_matches(fname, Base, :push!) ||
+            callee_matches(fname, Base, :pop!) ||
+            callee_matches(fname, Base, :empty!) ||
+            callee_matches(fname, Base, :setindex!))
             _changed = !isrequired[j]
             isrequired[j] = true
         end
