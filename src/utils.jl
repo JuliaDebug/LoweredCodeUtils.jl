@@ -111,17 +111,25 @@ function isanonymous_typedef(stmt)
         src = stmt    # just for naming consistency
         length(src.code) >= 4 || return false
         @static if VERSION ≥ v"1.9.0-DEV.391"
-            stmt = src.code[end-2]
-            isexpr(stmt, :(=)) || return false
-            name = stmt.args[1]
-            isa(name, Symbol) || return false
+            for i = length(src.code)-2:-1:1
+                stmt = src.code[i]
+                isexpr(stmt, :(=)) || return false
+                name = stmt.args[1]
+                if isa(name, GlobalRef)
+                    name = name.name
+                else
+                    isa(name, Symbol) || return false
+                end
+                return startswith(String(name), "#")
+            end
+            return false
         else
             stmt = src.code[end-1]
             isexpr(stmt, :call) || return false
             is_global_ref(stmt.args[1], Core, :_typebody!) || return false
             name = stmt.args[2]::Symbol
+            return startswith(String(name), "#")
         end
-        return startswith(String(name), "#")
     end
     return false
 end

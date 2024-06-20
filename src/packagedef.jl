@@ -42,10 +42,10 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     end
     lwr = Meta.lower(@__MODULE__, ex)
     src = lwr.args[1]
-    edges = CodeEdges(src)
-    isrequired = lines_required(:s, src, edges)
-    lines_required(:s, src, edges; norequire=())
-    lines_required(:s, src, edges; norequire=exclude_named_typedefs(src, edges))
+    edges = CodeEdges(@__MODULE__, src)
+    isrequired = lines_required(GlobalRef(@__MODULE__, :s), src, edges)
+    lines_required(GlobalRef(@__MODULE__, :s), src, edges; norequire=())
+    lines_required(GlobalRef(@__MODULE__, :s), src, edges; norequire=exclude_named_typedefs(src, edges))
     for isreq in (isrequired, convert(Vector{Bool}, isrequired))
         lines_required!(isreq, src, edges; norequire=())
         lines_required!(isreq, src, edges; norequire=exclude_named_typedefs(src, edges))
