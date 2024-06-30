@@ -14,14 +14,17 @@ macro issslotnum(stmt)
 end
 
 """
-    iscallto(stmt, name)
+    iscallto(stmt, name, src)
 
 Returns `true` is `stmt` is a call expression to `name`.
 """
-function iscallto(@nospecialize(stmt), name)
+function iscallto(@nospecialize(stmt), name, src)
     if isa(stmt, Expr)
         if stmt.head === :call
             a = stmt.args[1]
+            if isa(a, SSAValue) || isa(a, Core.SSAValue)
+                a = src.code[a.id]
+            end
             a === name && return true
             is_global_ref(a, Core, :_apply) && stmt.args[2] === name && return true
             is_global_ref(a, Core, :_apply_iterate) && stmt.args[3] === name && return true

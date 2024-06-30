@@ -189,11 +189,19 @@ function identify_framemethod_calls(frame)
                 key = key::Union{Symbol,Bool,Nothing}
                 for (j, mstmt) in enumerate(msrc.code)
                     isa(mstmt, Expr) || continue
+                    jj = j
                     if mstmt.head === :call
                         mkey = mstmt.args[1]
+                        if isa(mkey, SSAValue) || isa(mkey, Core.SSAValue)
+                            refstmt = msrc.code[mkey.id]
+                            if isa(refstmt, Symbol)
+                                jj = mkey.id
+                                mkey = refstmt
+                            end
+                        end
                         if isa(mkey, Symbol)
                             # Could be a GlobalRef but then it's outside frame
-                            haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, j, mkey, key))
+                            haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, jj, mkey, key))
                         elseif is_global_ref(mkey, Core, isdefined(Core, :_apply_iterate) ? :_apply_iterate : :_apply)
                             ssaref = mstmt.args[end-1]
                             if isa(ssaref, JuliaInterpreter.SSAValue)
@@ -202,7 +210,7 @@ function identify_framemethod_calls(frame)
                             end
                             mkey = mstmt.args[end-2]
                             if isa(mkey, Symbol)
-                                haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, j, mkey, key))
+                                haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, jj, mkey, key))
                             end
                         end
                     elseif mstmt.head === :meta && mstmt.args[1] === :generated
@@ -210,7 +218,7 @@ function identify_framemethod_calls(frame)
                         if isa(newex, Expr)
                             if newex.head === :new && length(newex.args) >= 2 && is_global_ref(newex.args[1], Core, :GeneratedFunctionStub)
                                 mkey = newex.args[2]::Symbol
-                                haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, j, mkey, key))
+                                haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, jj, mkey, key))
                             end
                         end
                     end
@@ -356,7 +364,7 @@ function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentnam
             end
             if length(body.code) > 1
                 bodystmt = body.code[end-1]  # the line before the final return
-                iscallto(bodystmt, name) && return signature_top(frame, stmt, pc), false
+                iscallto(bodystmt, name, body) && return signature_top(frame, stmt, pc), false
             end
         end
         pc = next_or_nothing(frame, pc)
@@ -426,6 +434,9 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
         bodystmt = bodyparent.code[end-1]
         @assert isexpr(bodystmt, :call)
         ref = getcallee(bodystmt)
+        if isa(ref, SSAValue) || isa(ref, Core.SSAValue)
+            ref = bodyparent.code[ref.id]
+        end
         isa(ref, GlobalRef) || @show ref typeof(ref)
         @assert isa(ref, GlobalRef)
         @assert ref.mod == moduleof(frame)
@@ -581,7 +592,7 @@ function _methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; defi
     return pc
 end
 
-function is_self_call(@nospecialize(stmt), slotnames, argno=1)
+function is_self_call(@nospecialize(stmt), slotnames, argno::Integer=1)
     if isa(stmt, Expr)
         if stmt.head == :call
             a = stmt.args[argno]
@@ -612,6 +623,14 @@ Return the "body method" for a method `m`. `mbody` contains the code of the func
 when `m` was defined.
 """
 function bodymethod(mkw::Method)
+    Base.unwrap_unionall(mkw.sig).parameters[1] !== typeof(Core.kwcall) && isempty(Base.kwarg_decl(mkw)) && return mkw
+    mths = methods(Base.bodyfunction(mkw))
+    if length(mths) != 1
+        @show mkw
+        display(mths)
+    end
+    return only(mths)
+
     m = mkw
     local src
     while true
@@ -619,7 +638,7 @@ function bodymethod(mkw::Method)
         fakeargs = Any[nothing for i = 1:(framecode.scope::Method).nargs]
         frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
         src = framecode.src
-        (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
+        (length(src.code) > 1 && has_self_call(src, src.code[end-1])) || break
         # Build the optional arg, so we can get its type
         pc = frame.pc
         while pc < length(src.code) - 1
