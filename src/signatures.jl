@@ -639,7 +639,7 @@ function bodymethod(mkw::Method)
             fakeargs = Any[nothing for i = 1:(framecode.scope::Method).nargs]
             frame = JuliaInterpreter.prepare_frame(framecode, fakeargs, isa(m.sig, UnionAll) ? sparam_ub(m) : Core.svec())
             src = framecode.src
-            (length(src.code) > 1 && has_self_call(src, src.code[end-1])) || break
+            (length(src.code) > 1 && is_self_call(src.code[end-1], src.slotnames)) || break
             # Build the optional arg, so we can get its type
             pc = frame.pc
             while pc < length(src.code) - 1
