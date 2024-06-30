@@ -1,4 +1,4 @@
-module signatures
+module Signatures
 
 using LoweredCodeUtils
 using InteractiveUtils

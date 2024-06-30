@@ -281,8 +281,12 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(src)
     isrequired = fill(false, length(src.code))
-    @assert Meta.isexpr(src.code[end-1], :method, 3)
-    isrequired[end-1] = true
+    j = length(src.code) - 1
+    if !Meta.isexpr(src.code[end-1], :method, 3)
+        j -= 1
+    end
+    @assert Meta.isexpr(src.code[j], :method, 3)
+    isrequired[j] = true
     lines_required!(isrequired, src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.max_values(Int16) === 65536
