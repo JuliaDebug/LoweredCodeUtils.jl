@@ -14,14 +14,17 @@ macro issslotnum(stmt)
 end
 
 """
-    iscallto(stmt, name)
+    iscallto(stmt, name, src)
 
 Returns `true` is `stmt` is a call expression to `name`.
 """
-function iscallto(@nospecialize(stmt), name)
+function iscallto(@nospecialize(stmt), name, src)
     if isa(stmt, Expr)
         if stmt.head === :call
             a = stmt.args[1]
+            if isa(a, SSAValue) || isa(a, Core.SSAValue)
+                a = src.code[a.id]
+            end
             a === name && return true
             is_global_ref(a, Core, :_apply) && stmt.args[2] === name && return true
             is_global_ref(a, Core, :_apply_iterate) && stmt.args[3] === name && return true
@@ -110,15 +113,15 @@ function isanonymous_typedef(stmt)
     if isa(stmt, CodeInfo)
         src = stmt    # just for naming consistency
         length(src.code) >= 4 || return false
+        stmt = src.code[end-1]
+        isexpr(stmt, :call) || return false
+        is_global_ref(stmt.args[1], Core, :_typebody!) || return false
         @static if VERSION ≥ v"1.9.0-DEV.391"
-            stmt = src.code[end-2]
+            stmt = isa(stmt.args[3], Core.SSAValue) ? src.code[end-3] : src.code[end-2]
             isexpr(stmt, :(=)) || return false
             name = stmt.args[1]
             isa(name, Symbol) || return false
         else
-            stmt = src.code[end-1]
-            isexpr(stmt, :call) || return false
-            is_global_ref(stmt.args[1], Core, :_typebody!) || return false
             name = stmt.args[2]::Symbol
         end
         return startswith(String(name), "#")
