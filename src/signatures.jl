@@ -146,10 +146,12 @@ function identify_framemethod_calls(frame)
     for (i, stmt) in enumerate(frame.framecode.src.code)
         isa(stmt, Expr) || continue
         if stmt.head === :global && length(stmt.args) == 1
-            key = stmt.args[1]::Symbol
-            # We don't know for sure if this is a reference to a method, but let's
-            # tentatively cue it
-            push!(refs, key=>i)
+            key = stmt.args[1]
+            if isa(key, Symbol)
+                # We don't know for sure if this is a reference to a method, but let's
+                # tentatively cue it
+                push!(refs, key=>i)
+            end
         elseif stmt.head === :thunk && stmt.args[1] isa CodeInfo
             tsrc = stmt.args[1]::CodeInfo
             if length(tsrc.code) == 1
