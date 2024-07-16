@@ -85,6 +85,8 @@ function ismethod_with_name(src, stmt, target::AbstractString; reentrant::Bool=f
             name = src.code[name.id]
         elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.svec)
             name = name.args[2]
+        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.Typeof)
+            name = name.args[2]
         elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.apply_type)
             for arg in name.args[2:end]
                 ismethod_with_name(src, arg, target; reentrant=true) && return true
@@ -120,7 +122,11 @@ function isanonymous_typedef(stmt)
             stmt = isa(stmt.args[3], Core.SSAValue) ? src.code[end-3] : src.code[end-2]
             isexpr(stmt, :(=)) || return false
             name = stmt.args[1]
-            isa(name, Symbol) || return false
+            if isa(name, GlobalRef)
+                name = name.name
+            else
+                isa(name, Symbol) || return false
+            end
         else
             name = stmt.args[2]::Symbol
         end

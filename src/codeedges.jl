@@ -1,5 +1,3 @@
-const NamedVar = Union{Symbol,GlobalRef}
-
 ## Phase 1: direct links
 
 # There are 3 types of entities to track: ssavalues (line/statement numbers), slots, and named objects.
@@ -9,42 +7,44 @@ const NamedVar = Union{Symbol,GlobalRef}
 struct Links
     ssas::Vector{Int}
     slots::Vector{Int}
-    names::Vector{NamedVar}
+    names::Vector{GlobalRef}
 end
-Links() = Links(Int[], Int[], NamedVar[])
+Links() = Links(Int[], Int[], GlobalRef[])
 
 function Base.show(io::IO, l::Links)
     print(io, "ssas: ", showempty(l.ssas),
               ", slots: ", showempty(l.slots),
               ", names: ")
-    print(IOContext(io, :typeinfo=>Vector{NamedVar}), showempty(l.names))
+    print(IOContext(io, :typeinfo=>Vector{GlobalRef}), showempty(l.names))
     print(io, ';')
 end
 
 struct CodeLinks
+    thismod::Module
     ssapreds::Vector{Links}
     ssasuccs::Vector{Links}
     slotpreds::Vector{Links}
     slotsuccs::Vector{Links}
     slotassigns::Vector{Vector{Int}}
-    namepreds::Dict{NamedVar,Links}
-    namesuccs::Dict{NamedVar,Links}
-    nameassigns::Dict{NamedVar,Vector{Int}}
+    namepreds::Dict{GlobalRef,Links}
+    namesuccs::Dict{GlobalRef,Links}
+    nameassigns::Dict{GlobalRef,Vector{Int}}
 end
-function CodeLinks(nlines::Int, nslots::Int)
+function CodeLinks(thismod::Module, nlines::Int, nslots::Int)
     makelinks(n) = [Links() for _ = 1:n]
 
-    return CodeLinks(makelinks(nlines),
+    return CodeLinks(thismod,
+                     makelinks(nlines),
                      makelinks(nlines),
                      makelinks(nslots),
                      makelinks(nslots),
                      [Int[] for _ = 1:nslots],
-                     Dict{NamedVar,Links}(),
-                     Dict{NamedVar,Links}(),
-                     Dict{NamedVar,Vector{Int}}())
+                     Dict{GlobalRef,Links}(),
+                     Dict{GlobalRef,Links}(),
+                     Dict{GlobalRef,Vector{Int}}())
 end
-function CodeLinks(src::CodeInfo)
-    cl = CodeLinks(length(src.code), length(src.slotnames))
+function CodeLinks(thismod::Module, src::CodeInfo)
+    cl = CodeLinks(thismod, length(src.code), length(src.slotnames))
     direct_links!(cl, src)
 end
 
@@ -175,7 +175,7 @@ end
 
 
 function namedkeys(cl::CodeLinks)
-    ukeys = Set{NamedVar}()
+    ukeys = Set{GlobalRef}()
     for c in (cl.namepreds, cl.namesuccs, cl.nameassigns)
         for k in keys(c)
             push!(ukeys, k)
@@ -203,20 +203,23 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
         end
     end
 
-    P = Pair{Union{SSAValue,SlotNumber,NamedVar},Links}
+    P = Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}
 
     for (i, stmt) in enumerate(src.code)
         if isexpr(stmt, :thunk) && isa(stmt.args[1], CodeInfo)
-            icl = CodeLinks(stmt.args[1])
+            icl = CodeLinks(cl.thismod, stmt.args[1])
             add_inner!(cl, icl, i)
             continue
         elseif isa(stmt, Expr) && stmt.head ∈ trackedheads
             if stmt.head === :method && length(stmt.args) === 3 && isa(stmt.args[3], CodeInfo)
-                icl = CodeLinks(stmt.args[3])
+                icl = CodeLinks(cl.thismod, stmt.args[3])
                 add_inner!(cl, icl, i)
             end
             name = stmt.args[1]
-            if isa(name, Symbol)
+            if isa(name, GlobalRef) || isa(name, Symbol)
+                if isa(name, Symbol)
+                    name = GlobalRef(cl.thismod, name)
+                end
                 assign = get(cl.nameassigns, name, nothing)
                 if assign === nothing
                     cl.nameassigns[name] = assign = Int[]
@@ -228,6 +231,10 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                 end
                 target = P(name, targetstore)
                 add_links!(target, stmt, cl)
+            elseif name in (nothing, false)
+            else
+                @show stmt
+                error("name ", typeof(name), " not recognized")
             end
             rhs = stmt
             target = P(SSAValue(i), cl.ssapreds[i])
@@ -240,7 +247,10 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                 id = lhs.id
                 target = P(SlotNumber(id), cl.slotpreds[id])
                 push!(cl.slotassigns[id], i)
-            elseif isa(lhs, NamedVar)
+            elseif isa(lhs, GlobalRef) || isa(lhs, Symbol)
+                if isa(lhs, Symbol)
+                    lhs = GlobalRef(cl.thismod, lhs)
+                end
                 targetstore = get(cl.namepreds, lhs, nothing)
                 if targetstore === nothing
                     cl.namepreds[lhs] = targetstore = Links()
@@ -263,9 +273,9 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
     return cl
 end
 
-function add_links!(target::Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, @nospecialize(stmt), cl::CodeLinks)
+function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @nospecialize(stmt), cl::CodeLinks)
     _targetid, targetstore = target
-    targetid = _targetid::Union{SSAValue,SlotNumber,NamedVar}
+    targetid = _targetid::Union{SSAValue,SlotNumber,GlobalRef}
     # Adds bidirectional edges
     if @isssa(stmt)
         stmt = stmt::AnySSAValue
@@ -275,7 +285,10 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,NamedVar},Links}, @no
         stmt = stmt::AnySlotNumber
         push!(targetstore, SlotNumber(stmt.id))
         push!(cl.slotsuccs[stmt.id], targetid)
-    elseif isa(stmt, Symbol) || isa(stmt, GlobalRef)   # NamedVar
+    elseif isa(stmt, GlobalRef) || isa(stmt, Symbol)
+        if isa(stmt, Symbol)
+            stmt = GlobalRef(cl.thismod, stmt)
+        end
         push!(targetstore, stmt)
         namestore = get(cl.namesuccs, stmt, nothing)
         if namestore === nothing
@@ -311,7 +324,7 @@ function Base.push!(l::Links, id)
         k = id.id
         k ∉ l.slots && push!(l.slots, k)
     else
-        id = id::NamedVar
+        id = id::GlobalRef
         id ∉ l.names && push!(l.names, id)
     end
     return id
@@ -355,9 +368,9 @@ end
 struct CodeEdges
     preds::Vector{Vector{Int}}
     succs::Vector{Vector{Int}}
-    byname::Dict{NamedVar,Variable}
+    byname::Dict{GlobalRef,Variable}
 end
-CodeEdges(n::Integer) = CodeEdges([Int[] for i = 1:n], [Int[] for i = 1:n], Dict{Union{GlobalRef,Symbol},Variable}())
+CodeEdges(n::Integer) = CodeEdges([Int[] for i = 1:n], [Int[] for i = 1:n], Dict{GlobalRef,Variable}())
 
 function Base.show(io::IO, edges::CodeEdges)
     println(io, "CodeEdges:")
@@ -383,10 +396,10 @@ Analyze `src` and determine the chain of dependencies.
 - `edges.preds[i]` lists the preceding statements that statement `i` depends on.
 - `edges.succs[i]` lists the succeeding statements that depend on statement `i`.
 - `edges.byname[v]` returns information about the predecessors, successors, and assignment statements
-  for an object `v::$NamedVar`.
+  for an object `v::GlobalRef`.
 """
-function CodeEdges(src::CodeInfo)
-    cl = CodeLinks(src)
+function CodeEdges(mod::Module, src::CodeInfo)
+    cl = CodeLinks(mod, src)
     CodeEdges(src, cl)
 end
 
@@ -412,7 +425,10 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
                 id = lhs.id
                 linkpreds, linksuccs, listassigns = cl.slotpreds[id], cl.slotsuccs[id], cl.slotassigns[id]
             else
-                lhs = lhs::NamedVar
+                lhs = lhs::Union{GlobalRef,Symbol}
+                if lhs isa Symbol
+                    lhs = GlobalRef(cl.thismod, lhs)
+                end
                 linkpreds = get(cl.namepreds, lhs, emptylink)
                 linksuccs = get(cl.namesuccs, lhs, emptylink)
                 listassigns = get(cl.nameassigns, lhs, emptylist)
@@ -546,7 +562,7 @@ function terminal_preds(i::Int, edges::CodeEdges)
 end
 
 """
-    isrequired = lines_required(obj::$NamedVar, src::CodeInfo, edges::CodeEdges)
+    isrequired = lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges)
     isrequired = lines_required(idx::Int,                     src::CodeInfo, edges::CodeEdges)
 
 Determine which lines might need to be executed to evaluate `obj` or the statement indexed by `idx`.
@@ -556,16 +572,16 @@ will end up skipping a subset of such statements, perhaps while repeating others
 
 See also [`lines_required!`](@ref) and [`selective_eval!`](@ref).
 """
-function lines_required(obj::NamedVar, src::CodeInfo, edges::CodeEdges; kwargs...)
+function lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
-    objs = Set{NamedVar}([obj])
+    objs = Set{GlobalRef}([obj])
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
 function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges; kwargs...)
     isrequired = falses(length(edges.preds))
     isrequired[idx] = true
-    objs = Set{NamedVar}()
+    objs = Set{GlobalRef}()
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
@@ -583,7 +599,7 @@ For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src, edges
 extracting method signatures and not evaluating new definitions.
 """
 function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; kwargs...)
-    objs = Set{NamedVar}()
+    objs = Set{GlobalRef}()
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
@@ -643,7 +659,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 end
 
 function add_requests!(isrequired, objs, edges::CodeEdges, norequire)
-    objsnew = Set{NamedVar}()
+    objsnew = Set{GlobalRef}()
     for obj in objs
         add_obj!(isrequired, objsnew, obj, edges, norequire)
     end

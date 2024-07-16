@@ -61,17 +61,17 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModSelective, src)
     # Check that the result of direct evaluation agrees with selective evaluation
     Core.eval(ModEval, ex)
-    isrequired = lines_required(:x, src, edges)
+    isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
     # theere is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
     selective_eval_fromstart!(frame, isrequired)
     @test ModSelective.x === ModEval.x
     @test allmissing(ModSelective, (:y, :z, :a, :b, :k))
     @test !allmissing(ModSelective, (:x, :y))    # add :y here to test the `all` part of the test itself
     # To evaluate z we need to do all the computations for y
-    isrequired = lines_required(:z, src, edges)
+    isrequired = lines_required(GlobalRef(ModSelective, :z), src, edges)
     selective_eval_fromstart!(frame, isrequired)
     @test ModSelective.y === ModEval.y
     @test ModSelective.z === ModEval.z
@@ -82,7 +82,7 @@ module ModSelective end
     @test ModSelective.b === ModEval.b
     # Test that we get two separate evaluations of k
     @test allmissing(ModSelective, (:k,))
-    isrequired = lines_required(:k, src, edges)
+    isrequired = lines_required(GlobalRef(ModSelective, :k), src, edges)
     selective_eval_fromstart!(frame, isrequired)
     @test ModSelective.k != ModEval.k
 
@@ -101,8 +101,8 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
-    isrequired = lines_required(:a2, src, edges)
+    edges = CodeEdges(ModSelective, src)
+    isrequired = lines_required(GlobalRef(ModSelective, :a2), src, edges)
     selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     Core.eval(ModEval, ex)
     @test ModSelective.a2 === ModEval.a2 == 1
@@ -122,8 +122,8 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
-    isrequired = lines_required(:a3, src, edges)
+    edges = CodeEdges(ModSelective, src)
+    isrequired = lines_required(GlobalRef(ModSelective, :a3), src, edges)
     selective_eval_fromstart!(frame, isrequired)
     Core.eval(ModEval, ex)
     @test ModSelective.a3 === ModEval.a3 == 2
@@ -141,8 +141,8 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
-    isrequired = lines_required(:valcf, src, edges)
+    edges = CodeEdges(ModSelective, src)
+    isrequired = lines_required(GlobalRef(ModSelective, :valcf), src, edges)
     selective_eval_fromstart!(frame, isrequired)
     @test ModSelective.valcf == 4
 
@@ -158,8 +158,8 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
-    isrequired = lines_required(:c_os, src, edges)
+    edges = CodeEdges(ModSelective, src)
+    isrequired = lines_required(GlobalRef(ModSelective, :c_os), src, edges)
     @test sum(isrequired) >= length(isrequired) - 3
     selective_eval_fromstart!(frame, isrequired)
     Core.eval(ModEval, ex)
@@ -179,7 +179,7 @@ module ModSelective end
     @test ModEval.bar() == 1
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModSelective, src)
     # Mark just the load of Core.eval
     haseval(stmt) = (isa(stmt, Expr) && JuliaInterpreter.hasarg(isequal(:eval), stmt.args)) ||
                     (isa(stmt, Expr) && stmt.head === :call && is_quotenode(stmt.args[1], Core.eval))
@@ -210,8 +210,8 @@ module ModSelective end
     @test ModSelective.k11 == 11
     @test 3 <= ModSelective.s11 <= 15
     Core.eval(ModSelective, :(k11 = 0; s11 = -1))
-    edges = CodeEdges(frame.framecode.src)
-    isrequired = lines_required(:s11, frame.framecode.src, edges)
+    edges = CodeEdges(ModSelective, frame.framecode.src)
+    isrequired = lines_required(GlobalRef(ModSelective, :s11), frame.framecode.src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
@@ -220,9 +220,9 @@ module ModSelective end
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModSelective, src)
     # Check that the StructParent name is discovered everywhere it is used
-    var = edges.byname[:StructParent]
+    var = edges.byname[GlobalRef(ModSelective, :StructParent)]
     isrequired = minimal_evaluation(hastrackedexpr, src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModSelective.StructParent) === AbstractArray
@@ -230,7 +230,7 @@ module ModSelective end
     Core.eval(ModEval, ex)
     frame = Frame(ModEval, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModEval, src)
     isrequired = minimal_evaluation(hastrackedexpr, src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test supertype(ModEval.StructParent) === AbstractArray
@@ -240,7 +240,7 @@ module ModSelective end
     ex = :(struct NoParam end)
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModSelective, src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod_with_name(src, stmt, "NoParam"),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     @test isa(ModSelective.NoParam(), ModSelective.NoParam)
@@ -252,7 +252,7 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModSelective, src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod_with_name(src, stmt, "Struct"),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     @test isa(ModSelective.Struct([1,2,3]), ModSelective.Struct{Int})
@@ -269,7 +269,7 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModSelective, src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     kws = ModSelective.KWStruct(y=5.0f0)
@@ -279,7 +279,7 @@ module ModSelective end
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModSelective, src)
     isrequired = fill(false, length(src.code))
     j = length(src.code) - 1
     if !Meta.isexpr(src.code[end-1], :method, 3)
@@ -301,7 +301,7 @@ module ModSelective end
     Core.eval(ModEval, ex)
     frame = Frame(ModEval, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
+    edges = CodeEdges(ModEval, src)
     isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src, edges))  # initially mark only the constructor
     bbs = Core.Compiler.compute_basic_blocks(src.code)
     for (iblock, block) in enumerate(bbs.blocks)
@@ -324,8 +324,8 @@ module ModSelective end
         end
     end)
     src = thk.args[1]
-    edges = CodeEdges(src)
-    lr = lines_required(:revise538, src, edges)
+    edges = CodeEdges(ModEval, src)
+    lr = lines_required(GlobalRef(ModEval, :revise538), src, edges)
     selective_eval_fromstart!(Frame(ModEval, src), lr, #=istoplevel=#true)
     @test isdefined(ModEval, :revise538) && length(methods(ModEval.revise538, (Float32,))) == 1
 
@@ -338,7 +338,7 @@ module ModSelective end
         end
     end)
     src = thk.args[1]
-    edges = CodeEdges(src)
+    edges = CodeEdges(Main, src)
     idx = findfirst(stmt->Meta.isexpr(stmt, :method), src.code)
     lr = lines_required(idx, src, edges; norequire=exclude_named_typedefs(src, edges))
     idx = findfirst(stmt->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
@@ -349,7 +349,7 @@ module ModSelective end
             primitive type WindowsRawSocket sizeof(Ptr) * 8 end
         end)
         src = thk.args[1]
-        edges = CodeEdges(src)
+        edges = CodeEdges(Main, src)
         idx = findfirst(istypedef, src.code)
         r = LoweredCodeUtils.typedef_range(src, idx)
         @test last(r) == length(src.code) - 1
@@ -359,7 +359,7 @@ module ModSelective end
         # worth testing because this has proven quite crucial for debugging and
         # ensuring that these structures are as "self-documenting" as possible.
         io = IOBuffer()
-        l = LoweredCodeUtils.Links(Int[], [3, 5], LoweredCodeUtils.NamedVar[:hello])
+        l = LoweredCodeUtils.Links(Int[], [3, 5], LoweredCodeUtils.GlobalRef[GlobalRef(Main, :hello)])
         show(io, l)
         str = String(take!(io))
         @test occursin('∅', str)
@@ -375,7 +375,7 @@ module ModSelective end
         end
         lwr = Meta.lower(Main, ex)
         src = lwr.args[1]
-        cl = LoweredCodeUtils.CodeLinks(src)
+        cl = LoweredCodeUtils.CodeLinks(Main, src)
         show(io, cl)
         str = String(take!(io))
         @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
@@ -386,7 +386,7 @@ module ModSelective end
                   occursin(r"s:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str)   # with global var inference
         end
         if Base.VERSION < v"1.8"
-            @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[:s\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+            @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[\:\(Main\.s\)\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[\:\(Main\.s\)\];", str)
         end
         LoweredCodeUtils.print_with_code(io, src, cl)
         str = String(take!(io))
@@ -395,13 +395,13 @@ module ModSelective end
             @test occursin("# see name s", str)
             @test occursin("# see slot 1", str)
             if Base.VERSION < v"1.8"  # changed by global var inference
-                @test occursin(r"# preds: ssas: \[\d+\], slots: ∅, names: \[:s\]; succs: ssas: ∅, slots: ∅, names: \[:s\];", str)
+                @test occursin(r"# preds: ssas: \[\d+\], slots: ∅, names: \[\:\(Main\.s\)\]; succs: ssas: ∅, slots: ∅, names: \[\:\(Main\.s\)\];", str)
             end
         else
             @test occursin("No IR statement printer", str)
         end
         # CodeEdges
-        edges = CodeEdges(src)
+        edges = CodeEdges(Main, src)
         show(io, edges)
         str = String(take!(io))
         if Base.VERSION < v"1.10"
@@ -428,7 +428,7 @@ module ModSelective end
         end
         # Works with Frames too
         frame = Frame(ModSelective, ex)
-        edges = CodeEdges(frame.framecode.src)
+        edges = CodeEdges(ModSelective, frame.framecode.src)
         LoweredCodeUtils.print_with_code(io, frame, edges)
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
@@ -468,7 +468,7 @@ end
         lwr = Meta.lower(m, ex)
         src = first(lwr.args)
         stmts = src.code
-        edges = CodeEdges(src)
+        edges = CodeEdges(m, src)
 
         isrq = lines_required!(istypedef.(stmts), src, edges)
         frame = Frame(m, src)
