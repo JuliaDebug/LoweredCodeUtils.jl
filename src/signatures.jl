@@ -280,7 +280,15 @@ function set_to_running_name!(@nospecialize(recurse), replacements, frame, metho
         stmt = pc_expr(frame, pc)
     end
     @assert ismethod1(stmt)
-    cname, _pc, _ = get_running_name(recurse, frame, pc+1, callee, get(replacements, caller, caller))
+    cname, _pc, _ = try
+        get_running_name(recurse, frame, pc+1, callee, get(replacements, caller, caller))
+    catch err
+        if isa(err, UndefVarError)
+            # The function may not be defined, in which case there is nothing to replace
+            return replacements
+        end
+        throw(err)
+    end
     replacements[callee] = cname
     mi = methodinfos[cname] = methodinfos[callee]
     src = frame.framecode.src
