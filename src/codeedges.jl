@@ -156,7 +156,7 @@ function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks, bbc
     printstyled(io, bbchanged ? " " : "│", color=:light_black)
     printstyled(io, "             # ", color=:yellow)
     stmt = src.code[idx]
-    if isexpr(stmt, :(=))
+    if is_assignment_like(stmt)
         lhs = stmt.args[1]
         if @issslotnum(lhs)
             # id = lhs.id
@@ -183,6 +183,9 @@ function namedkeys(cl::CodeLinks)
     end
     return ukeys
 end
+
+is_assignment_like(stmt::Expr) = isexpr(stmt, :(=)) || (isexpr(stmt, :const) && length(stmt.args) == 2)
+is_assignment_like(@nospecialize stmt) = false
 
 function direct_links!(cl::CodeLinks, src::CodeInfo)
     # Utility for when a stmt itself contains a CodeInfo
@@ -238,7 +241,7 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             end
             rhs = stmt
             target = P(SSAValue(i), cl.ssapreds[i])
-        elseif isexpr(stmt, :(=))
+        elseif is_assignment_like(stmt)
             # An assignment
             stmt = stmt::Expr
             lhs, rhs = stmt.args[1], stmt.args[2]
@@ -415,7 +418,7 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     emptylist = Int[]
     for (i, stmt) in enumerate(src.code)
         # Identify line predecents for slots and named variables
-        if isexpr(stmt, :(=))
+        if is_assignment_like(stmt)
             stmt = stmt::Expr
             lhs = stmt.args[1]
             # Mark predecessors and successors of this line by following ssas & named assignments
@@ -899,7 +902,7 @@ function add_inplace!(isrequired, src, edges, norequire)
                     for k in edges.preds[j]
                         isrequired[k] || continue
                         predstmt = src.code[k]
-                        if isexpr(predstmt, :(=))
+                        if is_assignment_like(predstmt)
                             lhs = predstmt.args[1]
                             if @issslotnum(lhs) && lhs.id == id
                                 changed |= mark_if_inplace(stmt, j)
