@@ -59,7 +59,7 @@ function callee_matches(f, mod, sym)
 end
 
 function rhs(stmt)
-    isexpr(stmt, :(=)) && return (stmt::Expr).args[2]
+    is_assignment_like(stmt) && return (stmt::Expr).args[2]
     return stmt
 end
 
@@ -120,7 +120,7 @@ function isanonymous_typedef(stmt)
         is_global_ref(stmt.args[1], Core, :_typebody!) || return false
         @static if VERSION ≥ v"1.9.0-DEV.391"
             stmt = isa(stmt.args[3], Core.SSAValue) ? src.code[end-3] : src.code[end-2]
-            isexpr(stmt, :(=)) || return false
+            is_assignment_like(stmt) || return false
             name = stmt.args[1]
             if isa(name, GlobalRef)
                 name = name.name
@@ -185,7 +185,7 @@ function typedef_range(src::CodeInfo, idx)
                     # Advance to the type-assignment
                     while iend <= n
                         stmt = src.code[iend]
-                        isexpr(stmt, :(=)) && break
+                        is_assignment_like(stmt) && break
                         iend += 1
                     end
                 end
