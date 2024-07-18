@@ -185,7 +185,7 @@ function namedkeys(cl::CodeLinks)
 end
 
 is_assignment_like(stmt::Expr) = isexpr(stmt, :(=)) || (isexpr(stmt, :const) && length(stmt.args) == 2)
-is_assignment_like(stmt) = false
+is_assignment_like(@nospecialize stmt) = false
 
 function direct_links!(cl::CodeLinks, src::CodeInfo)
     # Utility for when a stmt itself contains a CodeInfo
