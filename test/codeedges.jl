@@ -25,7 +25,7 @@ function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
 end
 
 function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges; kwargs...)
-    isrequired = fill(false, length(src.code))
+    isrequired = LoweredCodeUtils.initialize_isrequired(length(src.code))
     for (i, stmt) in enumerate(src.code)
         if !isrequired[i]
             isrequired[i], haseval = predicate(stmt)
@@ -65,7 +65,7 @@ module ModSelective end
     # Check that the result of direct evaluation agrees with selective evaluation
     Core.eval(ModEval, ex)
     isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
-    # theere is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
+    # there is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
     selective_eval_fromstart!(frame, isrequired)
     @test ModSelective.x === ModEval.x
     @test allmissing(ModSelective, (:y, :z, :a, :b, :k))
@@ -160,7 +160,7 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
     isrequired = lines_required(GlobalRef(ModSelective, :c_os), src, edges)
-    @test sum(isrequired) >= length(isrequired) - 3
+    @test sum(∈((true, :exit)), isrequired) >= length(isrequired) - 3
     selective_eval_fromstart!(frame, isrequired)
     Core.eval(ModEval, ex)
     @test ModSelective.c_os === ModEval.c_os == Sys.iswindows()
@@ -183,7 +183,7 @@ module ModSelective end
     # Mark just the load of Core.eval
     haseval(stmt) = (isa(stmt, Expr) && JuliaInterpreter.hasarg(isequal(:eval), stmt.args)) ||
                     (isa(stmt, Expr) && stmt.head === :call && is_quotenode(stmt.args[1], Core.eval))
-    isrequired = map(haseval, src.code)
+    isrequired = Union{Bool,Symbol}[haseval(stmt) for stmt in src.code]
     @test sum(isrequired) == 1
     isrequired[edges.succs[findfirst(isrequired)]] .= true   # add lines that use Core.eval
     lines_required!(isrequired, src, edges)
@@ -227,8 +227,8 @@ module ModSelective end
     end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
-    edges = CodeEdges(src)
-    isrequired = lines_required(:x, src, edges)
+    edges = CodeEdges(ModSelective, src)
+    isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.x == 5
     @test !isdefined(ModSelective, :y)
@@ -297,7 +297,7 @@ module ModSelective end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
-    isrequired = fill(false, length(src.code))
+    isrequired = LoweredCodeUtils.initialize_isrequired(length(src.code))
     j = length(src.code) - 1
     if !Meta.isexpr(src.code[end-1], :method, 3)
         j -= 1
@@ -471,7 +471,8 @@ module ModSelective end
         end)
         lwr = Meta.lower(Main, ex)
         src = lwr.args[1]
-        LoweredCodeUtils.print_with_code(io, src, trues(length(src.code)))
+        isrq = fill!(LoweredCodeUtils.initialize_isrequired(length(src.code)), true)
+        LoweredCodeUtils.print_with_code(io, src, isrq)
         str = String(take!(io))
         @test count("s = ", str) == 2
         @test count("i = ", str) == 1
