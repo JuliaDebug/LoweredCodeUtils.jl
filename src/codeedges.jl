@@ -640,9 +640,6 @@ function lines_required!(isrequired::AbstractVector{Union{Bool,Symbol}}, objs, s
     iter = 0
     while changed
         changed = false
-        @show iter
-        print_with_code(stdout, src, isrequired)
-        println()
 
         # Handle ssa predecessors
         changed |= add_ssa_preds!(isrequired, src, edges, norequire)
@@ -651,7 +648,6 @@ function lines_required!(isrequired::AbstractVector{Union{Bool,Symbol}}, objs, s
         changed |= add_named_dependencies!(isrequired, edges, objs, norequire)
 
         # Add control-flow
-        changed |= add_loops!(isrequired, cfg, domtree, postdomtree)
         changed |= add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
 
         # So far, everything is generic graph traversal. Now we add some domain-specific information
@@ -730,84 +726,124 @@ end
 
 ## Add control-flow
 
-# Mark loops that contain evaluated statements
-function add_loops!(isrequired, cfg, domtree, postdomtree)
-    changed = false
-    for (ibb, bb) in enumerate(cfg.blocks)
-        for ibbp in bb.preds
-            # Is there a backwards-pointing predecessor, and if so are there any required statements between the two?
-            ibbp > ibb || continue   # not a loop-block predecessor
-            if postdominates(postdomtree, ibb, ibbp)
-                r = rng(cfg.blocks[ibbp])
-                if isrequired[r[end]] != true
-                    isrequired[r[end]] = true
-                    changed = true
-                end
-            end
+iscf(stmt) = isa(stmt, Core.GotoNode) || isa(stmt, Core.GotoIfNot) || isa(stmt, Core.ReturnNode)
+
+"""
+    ispredecessor(blocks, i, j)
+
+Determine whether block `i` is a predecessor of block `j` in the control-flow graph `blocks`.
+"""
+function ispredecessor(blocks, i, j, cache=Set{Int}())
+    for p in blocks[j].preds  # avoid putting `j` in the cache unless it loops back
+        getpreds!(cache, blocks, p)
+    end
+    return i ∈ cache
+end
+function getpreds!(cache, blocks, j)
+    if j ∈ cache
+        return cache
+    end
+    push!(cache, j)
+    for p in blocks[j].preds
+        getpreds!(cache, blocks, p)
+    end
+    return cache
+end
+
+function block_internals_needed(isrequired, src, r)
+    needed = false
+    for i in r
+        if isrequired[i] == true
+            iscf(src.code[i]) && continue
+            needed = true
+            break
         end
     end
-    return changed
+    return needed
 end
 
 function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
     changed, _changed = false, true
     blocks = cfg.blocks
-    nblocks = length(blocks)
+    needed = falses(length(blocks))
+    cache = Set{Int}()
     while _changed
         _changed = false
         for (ibb, bb) in enumerate(blocks)
             r = rng(bb)
-            if any(==(true), view(isrequired, r))
-                # Walk up the dominators
+            if block_internals_needed(isrequired, src, r)
+                needed[ibb] = true
+                # Check control flow that's needed to reach this block by walking up the dominators
                 jbb = ibb
                 while jbb != 1
-                    jdbb = domtree.idoms_bb[jbb]
+                    jdbb = domtree.idoms_bb[jbb]   # immediate dominator of jbb
                     dbb = blocks[jdbb]
-                    # Check the successors; if jbb doesn't post-dominate, mark the last statement
-                    for s in dbb.succs
-                        if !postdominates(postdomtree, jbb, s)
-                            idxlast = rng(dbb)[end]
-                            if isrequired[idxlast] != true
-                                println("add 1: ", idxlast)
-                                _changed = true
-                                isrequired[idxlast] = true
+                    idxlast = rng(dbb)[end]
+                    if iscf(src.code[idxlast])
+                        # Check the idom's successors; if jbb doesn't post-dominate, mark the last statement
+                        for s in dbb.succs
+                            if !postdominates(postdomtree, jbb, s)
+                                if isrequired[idxlast] != true
+                                    _changed = true
+                                    isrequired[idxlast] = true
+                                    break
+                                end
                             end
-                            break
                         end
                     end
                     jbb = jdbb
                 end
-                # Walk down the post-dominators, including self
+                # Walk down the post-dominators, starting with self
                 jbb = ibb
-                while jbb != 0 && jbb < nblocks
-                    pdbb = blocks[jbb]
-                    # Check if the exit of this block is a GotoNode or `return`
-                    if length(pdbb.succs) < 2
+                while jbb != 0
+                    empty!(cache)
+                    if ispredecessor(blocks, jbb, ibb, cache)  # is post-dominator jbb also a predecessor of ibb? If so we have a loop.
+                        pdbb = blocks[jbb]
                         idxlast = rng(pdbb)[end]
                         stmt = src.code[idxlast]
-                        if isa(stmt, GotoNode) || isa(stmt, Core.ReturnNode)
-                            if isrequired[idxlast] == false
-                                println("add 2: ", idxlast)
+                        if iscf(stmt)
+                            if isrequired[idxlast] != true
                                 _changed = true
-                                isrequired[idxlast] = :exit
+                                if isa(stmt, Core.ReturnNode) && isrequired[idxlast] != :exit
+                                    isrequired[idxlast] = :exit
+                                else
+                                    isrequired[idxlast] = true
+                                    if isa(stmt, Core.GotoIfNot) && idxlast < length(isrequired) && isrequired[idxlast+1] != true && iscf(src.code[idxlast+1])
+                                        isrequired[idxlast+1] = true
+                                    end
+                                end
                             end
                         end
                     end
                     jbb = postdomtree.idoms_bb[jbb]
                 end
-            elseif length(r) == 1
-                # pdbb = blocks[ibb]
-                # if length(pdbb.succs) < 2 && isa(src.code[r[1]], GotoNode)
-                #     idxlast = r[end]
-                #     if isrequired[idxlast] == false
-                #         println("add 3: ", idxlast)
-                #         _changed = true
-                #         isrequired[idxlast] = true
-                #     end
-                # end
             end
         end
         changed |= _changed
+    end
+    # Now handle "exclusions": in code that would fall through during selective evaluation, find a post-dominator between the two
+    # that is marked, or mark the end block
+    marked = findall(needed)
+    for k in Iterators.drop(eachindex(marked), 1)
+        ibb, jbb = marked[k-1], marked[k]
+        ok = false
+        ipbb = ibb
+        while ipbb < jbb
+            ipbb = postdomtree.idoms_bb[ipbb]
+            ipbb == 0 && break
+            idxlast = rng(blocks[ipbb])[end]
+            if isrequired[idxlast] != false
+                ok = true
+                break
+            end
+        end
+        if !ok
+            idxlast = rng(blocks[ibb])[end]
+            if isrequired[idxlast] != true
+                isrequired[idxlast] = true
+                changed = true
+            end
+        end
     end
     return changed
 end
