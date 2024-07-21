@@ -902,17 +902,6 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
                 # end
             end
         end
-        if !ok
-            print_with_code(stdout, src, isrequired)
-            @show ibb jbb ipbb
-            ipbb = postdomtree.idoms_bb[ibb]
-            print("ibb postdoms: ")
-            while ipbb != 0
-                print(ipbb, " ")
-                ipbb = postdomtree.idoms_bb[ipbb]
-            end
-            println()
-        end
         jbb <= length(blocks) && @assert ok
     end
     return changed
@@ -953,7 +942,7 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
         stmt = stmts[idx]
         isrequired[idx] == true || (idx += 1; continue)
         for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
-            if idx ∈ typedefr
+            if idx ∈ typedefr && !iscf(stmt)  # exclude control-flow nodes since they may be needed for other purposes
                 ireq = view(isrequired, typedefr)
                 if !all(==(true), ireq)
                     changed = true

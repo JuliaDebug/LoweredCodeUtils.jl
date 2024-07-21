@@ -219,10 +219,10 @@ module ModSelective end
     # Final block is not a `return`
     ex = quote
         x = 1
-        y = 7
+        yy = 7
         @label loop
         x += 1
-        x < 5 || return y
+        x < 5 || return yy
         @goto loop
     end
     frame = Frame(ModSelective, ex)
@@ -231,7 +231,7 @@ module ModSelective end
     isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.x == 5
-    @test !isdefined(ModSelective, :y)
+    @test !isdefined(ModSelective, :yy)
 
     # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
@@ -326,7 +326,7 @@ module ModSelective end
         if iblock == length(bbs.blocks)
             @test any(idx->isrequired[idx]==true, r)
         else
-            @test !any(idx->isrequired[idx]==true, r)
+            @test !any(idx->isrequired[idx]==true && !LoweredCodeUtils.iscf(src.code[idx]), r)
         end
     end
 
