@@ -488,7 +488,9 @@ end
         stmts = src.code
         edges = CodeEdges(m, src)
 
-        isrq = lines_required!(istypedef.(stmts), src, edges)
+        isrq = LoweredCodeUtils.initialize_isrequired(length(stmts))
+        copyto!(isrq, istypedef.(stmts))
+        lines_required!(isrq, src, edges)
         frame = Frame(m, src)
         selective_eval_fromstart!(frame, isrq, #=toplevel=#true)
 

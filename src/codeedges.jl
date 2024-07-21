@@ -369,8 +369,9 @@ struct CodeEdges
     preds::Vector{Vector{Int}}
     succs::Vector{Vector{Int}}
     byname::Dict{GlobalRef,Variable}
+    slotassigns::Vector{Vector{Int}}
 end
-CodeEdges(n::Integer) = CodeEdges([Int[] for i = 1:n], [Int[] for i = 1:n], Dict{GlobalRef,Variable}())
+CodeEdges(nstmts::Integer, nslots::Integer) = CodeEdges([Int[] for i = 1:nstmts], [Int[] for i = 1:nstmts], Dict{GlobalRef,Variable}(), [Int[] for i = 1:nslots])
 
 function Base.show(io::IO, edges::CodeEdges)
     println(io, "CodeEdges:")
@@ -389,7 +390,7 @@ end
 
 
 """
-    edges = CodeEdges(src::CodeInfo)
+    edges = CodeEdges(mod::Module, src::CodeInfo)
 
 Analyze `src` and determine the chain of dependencies.
 
@@ -410,7 +411,10 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     # Replace/add named intermediates (slot & named-variable references) with statement numbers
     nstmts, nslots = length(src.code), length(src.slotnames)
     marked, slothandled = BitSet(), fill(false, nslots)  # working storage during resolution
-    edges = CodeEdges(nstmts)
+    edges = CodeEdges(nstmts, nslots)
+    for (edge_s, link_s) in zip(edges.slotassigns, cl.slotassigns)
+        append!(edge_s, link_s)
+    end
     emptylink = Links()
     emptylist = Int[]
     for (i, stmt) in enumerate(src.code)
@@ -640,9 +644,9 @@ function lines_required!(isrequired::AbstractVector{Union{Bool,Symbol}}, objs, s
     iter = 0
     while changed
         changed = false
-        @show iter
-        print_with_code(stdout, src, isrequired)
-        println()
+        # @show iter
+        # print_with_code(stdout, src, isrequired)
+        # println()
 
         # Handle ssa predecessors
         changed |= add_ssa_preds!(isrequired, src, edges, norequire)
@@ -730,6 +734,17 @@ end
 ## Add control-flow
 
 iscf(stmt) = isa(stmt, Core.GotoNode) || isa(stmt, Core.GotoIfNot) || isa(stmt, Core.ReturnNode)
+function jumps_back(src, i)
+    stmt = src.code[i]
+    (isa(stmt, Core.GotoNode) && stmt.label < i ||
+        isa(stmt, Core.GotoIfNot) && stmt.dest < i) && return true
+    if isa(stmt, Core.GotoIfNot) && i < length(src.code)
+        stmt = src.code[i+1]
+        isa(stmt, Core.GotoNode) && return stmt.label < i
+    end
+    return false
+end
+
 function markcf!(isrequired, src, i)
     stmt = src.code[i]
     @assert iscf(stmt)
@@ -783,7 +798,7 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
             r = rng(bb)
             if block_internals_needed(isrequired, src, r)
                 needed[ibb] = true
-                # Check this blocks precessors and mark any that are just control-flow
+                # Check this block's precessors and mark any that are just control-flow
                 for p in bb.preds
                     r = rng(blocks[p])
                     if length(r) == 1 && iscf(src.code[r[1]])
@@ -814,21 +829,25 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
                 while jbb != 0
                     if ispredecessor(blocks, jbb, ibb, empty!(cache))  # is post-dominator jbb also a predecessor of ibb? If so we have a loop.
                         pdbb = blocks[jbb]
-                        idxlast = rng(pdbb)[end]
-                        stmt = src.code[idxlast]
-                        if iscf(stmt)
-                            if isrequired[idxlast] != true
-                                _changed = true
-                                if isa(stmt, Core.ReturnNode) && isrequired[idxlast] != :exit
-                                    isrequired[idxlast] = :exit
-                                else
-                                    isrequired[idxlast] = true
-                                    if isa(stmt, Core.GotoIfNot) && idxlast < length(isrequired) && isrequired[idxlast+1] != true && iscf(src.code[idxlast+1])
-                                        isrequired[idxlast+1] = true
+                        r = rng(pdbb)
+                        # if block_internals_needed(isrequired, src, r)
+                            idxlast = rng(pdbb)[end]
+                            stmt = src.code[idxlast]
+                            if iscf(stmt) && jumps_back(src, idxlast)
+                                if isrequired[idxlast] != true
+                                    _changed = true
+                                    if isa(stmt, Core.ReturnNode) && isrequired[idxlast] != :exit
+                                        isrequired[idxlast] = :exit
+                                    else
+                                        isrequired[idxlast] = true
+                                        if isa(stmt, Core.GotoIfNot) && idxlast < length(isrequired) && isrequired[idxlast+1] != true && iscf(src.code[idxlast+1])
+                                            isrequired[idxlast+1] = true
+                                        end
                                     end
+                                    break
                                 end
                             end
-                        end
+                        # end
                     end
                     jbb = postdomtree.idoms_bb[jbb]
                 end
@@ -867,10 +886,14 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
                 # Mark the ipostdom's predecessors...
                 for k in blocks[ipbb].preds
                     idxlast = rng(blocks[k])[end]
-                    if iscf(src.code[idxlast])
+                    stmt = src.code[idxlast]
+                    if iscf(stmt)
                         if markcf!(isrequired, src, idxlast)
                             changed = true
                             ok = true
+                            if isa(stmt, Core.GotoIfNot) && idxlast < length(isrequired) && isrequired[idxlast+1] != true && iscf(src.code[idxlast+1])
+                                isrequired[idxlast+1] = true
+                            end
                         end
                     end
                 end
