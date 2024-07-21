@@ -324,9 +324,9 @@ module ModSelective end
     for (iblock, block) in enumerate(bbs.blocks)
         r = LoweredCodeUtils.rng(block)
         if iblock == length(bbs.blocks)
-            @test any(idx->isrequired[idx], r)
+            @test any(idx->isrequired[idx]==true, r)
         else
-            @test !any(idx->isrequired[idx], r)
+            @test !any(idx->isrequired[idx]==true, r)
         end
     end
 
