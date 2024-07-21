@@ -640,6 +640,9 @@ function lines_required!(isrequired::AbstractVector{Union{Bool,Symbol}}, objs, s
     iter = 0
     while changed
         changed = false
+        @show iter
+        print_with_code(stdout, src, isrequired)
+        println()
 
         # Handle ssa predecessors
         changed |= add_ssa_preds!(isrequired, src, edges, norequire)
@@ -727,6 +730,13 @@ end
 ## Add control-flow
 
 iscf(stmt) = isa(stmt, Core.GotoNode) || isa(stmt, Core.GotoIfNot) || isa(stmt, Core.ReturnNode)
+function markcf!(isrequired, src, i)
+    stmt = src.code[i]
+    @assert iscf(stmt)
+    isrequired[i] ∈ (true, :exit) && return false
+    isrequired[i] = isa(stmt, Core.ReturnNode) ? :exit : true
+    return true
+end
 
 """
     ispredecessor(blocks, i, j)
@@ -773,6 +783,13 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
             r = rng(bb)
             if block_internals_needed(isrequired, src, r)
                 needed[ibb] = true
+                # Check this blocks precessors and mark any that are just control-flow
+                for p in bb.preds
+                    r = rng(blocks[p])
+                    if length(r) == 1 && iscf(src.code[r[1]])
+                        _changed |= markcf!(isrequired, src, r[1])
+                    end
+                end
                 # Check control flow that's needed to reach this block by walking up the dominators
                 jbb = ibb
                 while jbb != 1
@@ -783,9 +800,8 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
                         # Check the idom's successors; if jbb doesn't post-dominate, mark the last statement
                         for s in dbb.succs
                             if !postdominates(postdomtree, jbb, s)
-                                if isrequired[idxlast] != true
+                                if markcf!(isrequired, src, idxlast)
                                     _changed = true
-                                    isrequired[idxlast] = true
                                     break
                                 end
                             end
@@ -796,8 +812,7 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
                 # Walk down the post-dominators, starting with self
                 jbb = ibb
                 while jbb != 0
-                    empty!(cache)
-                    if ispredecessor(blocks, jbb, ibb, cache)  # is post-dominator jbb also a predecessor of ibb? If so we have a loop.
+                    if ispredecessor(blocks, jbb, ibb, empty!(cache))  # is post-dominator jbb also a predecessor of ibb? If so we have a loop.
                         pdbb = blocks[jbb]
                         idxlast = rng(pdbb)[end]
                         stmt = src.code[idxlast]
@@ -821,29 +836,84 @@ function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
         end
         changed |= _changed
     end
-    # Now handle "exclusions": in code that would fall through during selective evaluation, find a post-dominator between the two
-    # that is marked, or mark the end block
-    marked = findall(needed)
+    # Now handle "exclusions": in code that would inappropriately fall through
+    # during selective evaluation, find a post-dominator between the two that is
+    # marked, or mark one if absent.
+    marked = push!(findall(needed), length(blocks)+1)
     for k in Iterators.drop(eachindex(marked), 1)
         ibb, jbb = marked[k-1], marked[k]
+        if jbb <= length(blocks)
+            # are ibb and jbb exclusive?
+            ispredecessor(blocks, ibb, jbb, empty!(cache)) && continue
+        end
+        # Is there a required control-flow statement between ibb and jbb?
         ok = false
         ipbb = ibb
         while ipbb < jbb
             ipbb = postdomtree.idoms_bb[ipbb]
             ipbb == 0 && break
             idxlast = rng(blocks[ipbb])[end]
-            if isrequired[idxlast] != false
+            if iscf(src.code[idxlast]) && isrequired[idxlast] != false
                 ok = true
                 break
             end
         end
         if !ok
-            idxlast = rng(blocks[ibb])[end]
-            if isrequired[idxlast] != true
-                isrequired[idxlast] = true
-                changed = true
+            # Mark a control-flow statement between ibb and jbb
+            ipbb = ibb
+            while ipbb < jbb
+                ipbb = postdomtree.idoms_bb[ipbb]
+                ipbb == 0 && break
+                # Mark the ipostdom's predecessors...
+                for k in blocks[ipbb].preds
+                    idxlast = rng(blocks[k])[end]
+                    if iscf(src.code[idxlast])
+                        if markcf!(isrequired, src, idxlast)
+                            changed = true
+                            ok = true
+                        end
+                    end
+                end
+                # ...or the ipostdom itself
+                if !ok
+                    idxlast = rng(blocks[ipbb])[end]
+                    stmt = src.code[idxlast]
+                    if isa(stmt, Core.GotoNode) || isa(stmt, Core.ReturnNode)  # unconditional jump
+                        if markcf!(isrequired, src, idxlast)
+                            changed = true
+                            ok = true
+                        end
+                    end
+                    # r = rng(blocks[ipbb])
+                    # if length(r) == 1 && iscf(src.code[r[1]])
+                    #     if markcf!(isrequired, src, r[1])
+                    #         changed = true
+                    #         ok = true
+                    #     end
+                    # end
+                end
+                # idxlast = rng(blocks[ipbb])[end]
+                # if iscf(src.code[idxlast])    # ideally we might find an unconditional jump to prevent unnecessary evaluation of the conditional
+                #     if markcf!(isrequired, src, idxlast)
+                #         changed = true
+                #         ok = true
+                #         break
+                #     end
+                # end
             end
         end
+        if !ok
+            print_with_code(stdout, src, isrequired)
+            @show ibb jbb ipbb
+            ipbb = postdomtree.idoms_bb[ibb]
+            print("ibb postdoms: ")
+            while ipbb != 0
+                print(ipbb, " ")
+                ipbb = postdomtree.idoms_bb[ipbb]
+            end
+            println()
+        end
+        jbb <= length(blocks) && @assert ok
     end
     return changed
 end
