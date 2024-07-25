@@ -348,10 +348,11 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     Core.eval(Lowering, ex)
     frame = Frame(Lowering, ex)
     dct = rename_framemethods!(frame)
-    ks = collect(filter(k->startswith(String(k), "#Items#"), keys(dct)))
+    ks = collect(filter(k->startswith(String(k.name), "#Items#"), keys(dct)))
     @test length(ks) == 2
     @test dct[ks[1]] == dct[ks[2]]
-    @test isdefined(Lowering, ks[1]) || isdefined(Lowering, ks[2])
+    @test ks[1].mod === ks[2].mod === Lowering
+    @test isdefined(Lowering, ks[1].name) || isdefined(Lowering, ks[2].name)
     if !isdefined(Core, :kwcall)
         nms = filter(sym->occursin(r"#Items#\d+#\d+", String(sym)), names(Lowering; all=true))
         @test length(nms) == 1
@@ -455,7 +456,7 @@ let
         @show foogr(1,2,3)
     end
     methranges = rename_framemethods!(Frame(@__MODULE__, ex))
-    @test haskey(methranges, :foogr)
+    @test haskey(methranges, GlobalRef(@__MODULE__, :foogr))
 end
 
 function fooqn end
@@ -469,7 +470,7 @@ let
         @show fooqn(1,2,3)
     end
     methranges = rename_framemethods!(Frame(@__MODULE__, ex))
-    @test haskey(methranges, :fooqn)
+    @test haskey(methranges, GlobalRef(@__MODULE__, :fooqn))
 end
 
 # define methods in other module
@@ -486,7 +487,7 @@ let
         @show sandboxgr.foogr_sandbox(1,2,3)
     end
     methranges = rename_framemethods!(Frame(@__MODULE__, ex))
-    @test haskey(methranges, :foogr_sandbox)
+    @test haskey(methranges, GlobalRef(sandboxgr, :foogr_sandbox))
 end
 
 module sandboxqn; function fooqn_sandbox end; end
@@ -500,7 +501,7 @@ let
         @show sandboxqn.fooqn_sandbox(1,2,3)
     end
     methranges = rename_framemethods!(Frame(@__MODULE__, ex))
-    @test haskey(methranges, :fooqn_sandbox)
+    @test haskey(methranges, GlobalRef(sandboxqn, :fooqn_sandbox))
 end
 
 end

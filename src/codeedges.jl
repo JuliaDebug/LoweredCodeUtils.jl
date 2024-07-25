@@ -157,7 +157,7 @@ function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks, bbc
     printstyled(io, "             # ", color=:yellow)
     stmt = src.code[idx]
     if is_assignment_like(stmt)
-        lhs = stmt.args[1]
+        lhs = normalize_defsig(stmt.args[1], cl.thismod)
         if @issslotnum(lhs)
             # id = lhs.id
             # preds, succs = cl.slotpreds[id], cl.slotsuccs[id]
