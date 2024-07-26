@@ -392,7 +392,7 @@ module ModSelective end
         str = String(take!(io))
         if isdefined(Base.IRShow, :show_ir_stmt)
             @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
-            @test occursin("# see name s", str)
+            @test occursin("# see name Main.s", str)
             @test occursin("# see slot 1", str)
             if Base.VERSION < v"1.8"  # changed by global var inference
                 @test occursin(r"# preds: ssas: \[\d+\], slots: ∅, names: \[\:\(Main\.s\)\]; succs: ssas: ∅, slots: ∅, names: \[\:\(Main\.s\)\];", str)

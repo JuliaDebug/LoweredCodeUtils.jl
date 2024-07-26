@@ -121,8 +121,8 @@ MethodInfo(start) = MethodInfo(start, -1, Int[])
 struct SelfCall
     linetop::Int
     linebody::Int
-    callee::Symbol
-    caller::Union{Symbol,Bool,Nothing}
+    callee::GlobalRef
+    caller::Union{GlobalRef,Bool,Nothing}
 end
 
 """
@@ -140,14 +140,14 @@ which will correspond to a 3-argument `:method` expression containing a `CodeInf
 `callee` is the Symbol of the called method.
 """
 function identify_framemethod_calls(frame)
-    refs = Pair{Symbol,Int}[]
-    methodinfos = Dict{Symbol,MethodInfo}()
+    refs = Pair{GlobalRef,Int}[]
+    methodinfos = Dict{GlobalRef,MethodInfo}()
     selfcalls = SelfCall[]
     for (i, stmt) in enumerate(frame.framecode.src.code)
         isa(stmt, Expr) || continue
         if stmt.head === :global && length(stmt.args) == 1
-            key = stmt.args[1]
-            if isa(key, Symbol)
+            key = normalize_defsig(stmt.args[1], frame)
+            if isa(key, GlobalRef)
                 # We don't know for sure if this is a reference to a method, but let's
                 # tentatively cue it
                 push!(refs, key=>i)
@@ -159,8 +159,8 @@ function identify_framemethod_calls(frame)
                 if is_return(tstmt)
                     tex = tstmt.val
                     if isa(tex, Expr)
-                        if tex.head === :method && (methname = tex.args[1]; isa(methname, Symbol))
-                            push!(refs, methname=>i)
+                        if tex.head === :method && (methname = tex.args[1]; isa(methname, Union{Symbol, GlobalRef}))
+                            push!(refs, normalize_defsig(methname, frame)=>i)
                         end
                     end
                 end
@@ -168,7 +168,7 @@ function identify_framemethod_calls(frame)
         elseif ismethod1(stmt)
             key = stmt.args[1]
             key = normalize_defsig(key, frame)
-            key = key::Symbol
+            key = key::GlobalRef
             mi = get(methodinfos, key, nothing)
             if mi === nothing
                 methodinfos[key] = MethodInfo(i)
@@ -178,7 +178,7 @@ function identify_framemethod_calls(frame)
         elseif ismethod3(stmt)
             key = stmt.args[1]
             key = normalize_defsig(key, frame)
-            if key isa Symbol
+            if key isa GlobalRef
                 # XXX A temporary hack to fix https://github.com/JuliaDebug/LoweredCodeUtils.jl/issues/80
                 #     We should revisit it.
                 mi = get(methodinfos, key, MethodInfo(1))
@@ -188,38 +188,40 @@ function identify_framemethod_calls(frame)
             end
             msrc = stmt.args[3]
             if msrc isa CodeInfo
-                key = key::Union{Symbol,Bool,Nothing}
+                key = key::Union{GlobalRef,Bool,Nothing}
                 for (j, mstmt) in enumerate(msrc.code)
                     isa(mstmt, Expr) || continue
                     jj = j
                     if mstmt.head === :call
-                        mkey = mstmt.args[1]
+                        mkey = normalize_defsig(mstmt.args[1], frame)
                         if isa(mkey, SSAValue) || isa(mkey, Core.SSAValue)
                             refstmt = msrc.code[mkey.id]
-                            if isa(refstmt, Symbol)
+                            if isa(refstmt, Union{Symbol, GlobalRef})
                                 jj = mkey.id
-                                mkey = refstmt
+                                mkey = normalize_defsig(refstmt, frame)
                             end
                         end
-                        if isa(mkey, Symbol)
-                            # Could be a GlobalRef but then it's outside frame
-                            haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, jj, mkey, key))
-                        elseif is_global_ref(mkey, Core, isdefined(Core, :_apply_iterate) ? :_apply_iterate : :_apply)
+                        if is_global_ref(mkey, Core, isdefined(Core, :_apply_iterate) ? :_apply_iterate : :_apply)
                             ssaref = mstmt.args[end-1]
                             if isa(ssaref, JuliaInterpreter.SSAValue)
                                 id = ssaref.id
                                 has_self_call(msrc, msrc.code[id]) || continue
                             end
-                            mkey = mstmt.args[end-2]
-                            if isa(mkey, Symbol)
+                            mkey = normalize_defsig(mstmt.args[end-2], frame)
+                            if isa(mkey, GlobalRef)
                                 haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, jj, mkey, key))
                             end
+                        elseif isa(mkey, GlobalRef)
+                            haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, jj, mkey, key))
                         end
                     elseif mstmt.head === :meta && mstmt.args[1] === :generated
                         newex = mstmt.args[2]
                         if isa(newex, Expr)
                             if newex.head === :new && length(newex.args) >= 2 && is_global_ref(newex.args[1], Core, :GeneratedFunctionStub)
-                                mkey = newex.args[2]::Symbol
+                                mkey = newex.args[2]
+                                if isa(mkey, Symbol)
+                                    mkey = GlobalRef(moduleof(frame), mkey)
+                                end
                                 haskey(methodinfos, mkey) && push!(selfcalls, SelfCall(i, jj, mkey, key))
                             end
                         end
@@ -235,20 +237,22 @@ function identify_framemethod_calls(frame)
     return methodinfos, selfcalls
 end
 
-# try to normalize `def` to `Symbol` representation
-function normalize_defsig(@nospecialize(def), frame::Frame)
+# try to normalize `def` to `GlobalRef` representation
+function normalize_defsig(@nospecialize(def), mod::Module)
     if def isa QuoteNode
         def = nameof(def.value)
-    elseif def isa GlobalRef
-        def = def.name
+    end
+    if def isa Symbol
+        def = GlobalRef(mod, def)
     end
     return def
 end
+normalize_defsig(@nospecialize(def), frame::Frame) = normalize_defsig(def, moduleof(frame))
 
 function callchain(selfcalls)
-    calledby = Dict{Symbol,Union{Symbol,Bool,Nothing}}()
+    calledby = Dict{GlobalRef,Union{GlobalRef,Bool,Nothing}}()
     for sc in selfcalls
-        startswith(String(sc.callee), '#') || continue
+        startswith(String(sc.callee.name), '#') || continue
         caller = get(calledby, sc.callee, nothing)
         if caller === nothing
             calledby[sc.callee] = sc.caller
@@ -261,7 +265,7 @@ function callchain(selfcalls)
 end
 
 function set_to_running_name!(@nospecialize(recurse), replacements, frame, methodinfos, selfcall, calledby, callee, caller)
-    if isa(caller, Symbol) && startswith(String(caller), '#')
+    if isa(caller, GlobalRef) && startswith(String(caller.name), '#')
         rep = get(replacements, caller, nothing)
         if rep === nothing
             parentcaller = get(calledby, caller, nothing)
@@ -313,9 +317,9 @@ the same name in the `start:stop` range.
 """
 function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos, selfcalls, calledby)
     src = frame.framecode.src
-    replacements = Dict{Symbol,Symbol}()
+    replacements = Dict{GlobalRef,GlobalRef}()
     for (callee, caller) in calledby
-        (!startswith(String(callee), '#') || haskey(replacements, callee)) && continue
+        (!startswith(String(callee.name), '#') || haskey(replacements, callee)) && continue
         idx = findfirst(sc->sc.callee === callee && sc.caller === caller, selfcalls)
         idx === nothing && continue
         try
@@ -364,7 +368,7 @@ function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentnam
             stmt = pc_expr(frame, pc)
         end
         body = stmt.args[3]
-        if stmt.args[1] !== name && isa(body, CodeInfo)
+        if normalize_defsig(stmt.args[1], frame) !== name && isa(body, CodeInfo)
             # This might be the GeneratedFunctionStub for a @generated method
             for (i, bodystmt) in enumerate(body.code)
                 if isexpr(bodystmt, :meta) && (bodystmt::Expr).args[1] === :generated
@@ -374,7 +378,7 @@ function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentnam
             end
             if length(body.code) > 1
                 bodystmt = body.code[end-1]  # the line before the final return
-                iscallto(bodystmt, name, body) && return signature_top(frame, stmt, pc), false
+                iscallto(bodystmt, moduleof(frame), name, body) && return signature_top(frame, stmt, pc), false
             end
         end
         pc = next_or_nothing(frame, pc)
@@ -412,6 +416,8 @@ function replacename!(args::AbstractVector, pr)
             replacename!(a.val::Expr, pr)
         elseif a === oldname
             args[i] = newname
+        elseif isa(a, Symbol) && a == oldname.name
+            args[i] = newname.name
         end
     end
     return args
@@ -438,7 +444,7 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
     methparent = whichtt(sigtparent)
     methparent === nothing && return name, pc, lastpcparent  # caller isn't defined, no correction is needed
     if isgen
-        cname = nameof(methparent.generator.gen)
+        cname = GlobalRef(moduleof(frame), nameof(methparent.generator.gen))
     else
         bodyparent = Base.uncompressed_ast(methparent)
         bodystmt = bodyparent.code[end-1]
@@ -450,7 +456,7 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
         isa(ref, GlobalRef) || @show ref typeof(ref)
         @assert isa(ref, GlobalRef)
         @assert ref.mod == moduleof(frame)
-        cname = ref.name
+        cname = ref
     end
     return cname, pc, lastpcparent
 end
@@ -519,21 +525,20 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         return pc, pc3
     end
     ismethod1(stmt) || Base.invokelatest(error, "expected method opening, got ", stmt)
-    name = stmt.args[1]
-    name = normalize_defsig(name, frame)
+    name = normalize_defsig(stmt.args[1], frame)
     if isa(name, Bool)
         error("not valid for anonymous methods")
     elseif name === missing
         Base.invokelatest(error, "given invalid definition: ", stmt)
     end
-    name = name::Symbol
+    name = name::GlobalRef
     # Is there any 3-arg method definition with the same name? If not, avoid risk of executing code that
     # we shouldn't (fixes https://github.com/timholy/Revise.jl/issues/758)
     found = false
     for i = pc+1:length(framecode.src.code)
         newstmt = framecode.src.code[i]
         if ismethod3(newstmt)
-            if ismethod_with_name(framecode.src, newstmt, string(name))
+            if ismethod_with_name(framecode.src, newstmt, string(name.name))
                 found = true
                 break
             end
@@ -550,7 +555,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         end
         pc3 = pc
         stmt = stmt::Expr
-        name3 = stmt.args[1]
+        name3 = normalize_defsig(stmt.args[1], frame)
         sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.

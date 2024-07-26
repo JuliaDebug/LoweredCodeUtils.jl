@@ -18,16 +18,16 @@ end
 
 Returns `true` is `stmt` is a call expression to `name`.
 """
-function iscallto(@nospecialize(stmt), name, src)
+function iscallto(@nospecialize(stmt), mod::Module, name::GlobalRef, src)
     if isa(stmt, Expr)
         if stmt.head === :call
             a = stmt.args[1]
             if isa(a, SSAValue) || isa(a, Core.SSAValue)
                 a = src.code[a.id]
             end
-            a === name && return true
-            is_global_ref(a, Core, :_apply) && stmt.args[2] === name && return true
-            is_global_ref(a, Core, :_apply_iterate) && stmt.args[3] === name && return true
+            normalize_defsig(a, mod) === name && return true
+            is_global_ref(a, Core, :_apply) && normalize_defsig(stmt.args[2], mod) === name && return true
+            is_global_ref(a, Core, :_apply_iterate) && normalize_defsig(stmt.args[3], mod) === name && return true
         end
     end
     return false
@@ -103,7 +103,7 @@ function ismethod_with_name(src, stmt, target::AbstractString; reentrant::Bool=f
     end
     # On Julia 1.6 we have to add escaping (CBinding makes function names like "(S)")
     target = escape_string(target, "()")
-    return match(Regex("(^|#)$target(\$|#)"), string(name)) !== nothing
+    return match(Regex("(^|#)$target(\$|#)"), isa(name, GlobalRef) ? string(name.name) : string(name)) !== nothing
 end
 
 # anonymous function types are defined in a :thunk expr with a characteristic CodeInfo
