@@ -543,19 +543,6 @@ function postprint_lineedges(io::IO, idx::Int, edges::CodeEdges, bbchanged::Bool
 end
 
 function terminal_preds(i::Int, edges::CodeEdges)
-    function terminal_preds!(s, j, edges, covered)
-        j ∈ covered && return s
-        push!(covered, j)
-        preds = edges.preds[j]
-        if isempty(preds)
-            push!(s, j)
-        else
-            for p in preds
-                terminal_preds!(s, p, edges, covered)
-            end
-        end
-        return s
-    end
     s, covered = BitSet(), BitSet()
     push!(covered, i)
     for p in edges.preds[i]
@@ -563,6 +550,20 @@ function terminal_preds(i::Int, edges::CodeEdges)
     end
     return s
 end
+function terminal_preds!(s, j, edges, covered)  # can't be an inner function because it calls itself (Core.Box)
+    j ∈ covered && return s
+    push!(covered, j)
+    preds = edges.preds[j]
+    if isempty(preds)
+        push!(s, j)
+    else
+        for p in preds
+            terminal_preds!(s, p, edges, covered)
+        end
+    end
+    return s
+end
+
 
 """
     isrequired = lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges)
