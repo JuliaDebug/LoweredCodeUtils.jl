@@ -326,6 +326,7 @@ function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos,
             set_to_running_name!(recurse, replacements, frame, methodinfos, selfcalls[idx], calledby, callee, caller)
         catch err
             @warn "skipping callee $callee (called by $caller) due to $err"
+            # showerror(stderr, err, stacktrace(catch_backtrace()))
         end
     end
     for sc in selfcalls
@@ -468,16 +469,8 @@ end
 Advance the program counter without executing the corresponding line.
 If `frame` is finished, `nextpc` will be `nothing`.
 """
-next_or_nothing(frame, pc) = next_or_nothing(finish_and_return!, frame, pc)
-next_or_nothing(@nospecialize(recurse), frame, pc) = pc < nstatements(frame.framecode) ? pc+1 : nothing
-next_or_nothing!(frame) = next_or_nothing!(finish_and_return!, frame)
-function next_or_nothing!(@nospecialize(recurse), frame)
-    pc = frame.pc
-    if pc < nstatements(frame.framecode)
-        return frame.pc = pc + 1
-    end
-    return nothing
-end
+next_or_nothing(frame::Frame, pc::Int) = next_or_nothing(finish_and_return!, frame, pc)
+next_or_nothing(@nospecialize(recurse), frame::Frame, pc::Int) = pc < nstatements(frame.framecode) ? pc+1 : nothing
 
 """
     nextpc = skip_until(predicate, [recurse], frame, pc)

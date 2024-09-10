@@ -65,7 +65,7 @@ module ModSelective end
     # Check that the result of direct evaluation agrees with selective evaluation
     Core.eval(ModEval, ex)
     isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
-    # theere is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
+    # there is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
     selective_eval_fromstart!(frame, isrequired)
     @test ModSelective.x === ModEval.x
     @test allmissing(ModSelective, (:y, :z, :a, :b, :k))
@@ -215,6 +215,24 @@ module ModSelective end
     selective_eval_fromstart!(frame, isrequired, true)
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
+
+    # Final block is not a `return`: Need to use `controller::SelectiveEvalController` explicitly
+    ex = quote
+        x = 1
+        yy = 7
+        @label loop
+        x += 1
+        x < 5 || return yy
+        @goto loop
+    end
+    frame = Frame(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(ModSelective, src)
+    controller = SelectiveEvalController()
+    isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges, controller)
+    selective_eval_fromstart!(controller, frame, isrequired, true)
+    @test ModSelective.x == 5
+    @test !isdefined(ModSelective, :yy)
 
     # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
