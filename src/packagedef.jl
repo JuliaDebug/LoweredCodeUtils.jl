@@ -21,6 +21,7 @@ if Base.VERSION < v"1.10"
 else
     const construct_domtree = Core.Compiler.construct_domtree
     const construct_postdomtree = Core.Compiler.construct_postdomtree
+    const dominates = Core.Compiler.dominates
     const postdominates = Core.Compiler.postdominates
 end
 
@@ -46,10 +47,8 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     isrequired = lines_required(GlobalRef(@__MODULE__, :s), src, edges)
     lines_required(GlobalRef(@__MODULE__, :s), src, edges; norequire=())
     lines_required(GlobalRef(@__MODULE__, :s), src, edges; norequire=exclude_named_typedefs(src, edges))
-    for isreq in (isrequired, convert(Vector{Bool}, isrequired))
-        lines_required!(isreq, src, edges; norequire=())
-        lines_required!(isreq, src, edges; norequire=exclude_named_typedefs(src, edges))
-    end
+    lines_required!(isrequired, src, edges; norequire=())
+    lines_required!(isrequired, src, edges; norequire=exclude_named_typedefs(src, edges))
     frame = Frame(@__MODULE__, src)
     # selective_eval_fromstart!(frame, isrequired, true)
     precompile(selective_eval_fromstart!, (typeof(frame), typeof(isrequired), Bool))  # can't @eval during precompilation

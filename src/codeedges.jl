@@ -372,8 +372,9 @@ struct CodeEdges
     preds::Vector{Vector{Int}}
     succs::Vector{Vector{Int}}
     byname::Dict{GlobalRef,Variable}
+    slotassigns::Vector{Vector{Int}}
 end
-CodeEdges(n::Integer) = CodeEdges([Int[] for i = 1:n], [Int[] for i = 1:n], Dict{GlobalRef,Variable}())
+CodeEdges(nstmts::Integer, nslots::Integer) = CodeEdges([Int[] for i = 1:nstmts], [Int[] for i = 1:nstmts], Dict{GlobalRef,Variable}(), [Int[] for i = 1:nslots])
 
 function Base.show(io::IO, edges::CodeEdges)
     println(io, "CodeEdges:")
@@ -392,7 +393,7 @@ end
 
 
 """
-    edges = CodeEdges(src::CodeInfo)
+    edges = CodeEdges(mod::Module, src::CodeInfo)
 
 Analyze `src` and determine the chain of dependencies.
 
@@ -413,7 +414,10 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     # Replace/add named intermediates (slot & named-variable references) with statement numbers
     nstmts, nslots = length(src.code), length(src.slotnames)
     marked, slothandled = BitSet(), fill(false, nslots)  # working storage during resolution
-    edges = CodeEdges(nstmts)
+    edges = CodeEdges(nstmts, nslots)
+    for (edge_s, link_s) in zip(edges.slotassigns, cl.slotassigns)
+        append!(edge_s, link_s)
+    end
     emptylink = Links()
     emptylist = Int[]
     for (i, stmt) in enumerate(src.code)
@@ -565,6 +569,8 @@ function terminal_preds!(s, j, edges, covered)  # can't be an inner function bec
 end
 
 
+initialize_isrequired(n) = fill!(Vector{Union{Bool,Symbol}}(undef, n), false)
+
 """
     isrequired = lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges)
     isrequired = lines_required(idx::Int,                     src::CodeInfo, edges::CodeEdges)
@@ -577,20 +583,20 @@ will end up skipping a subset of such statements, perhaps while repeating others
 See also [`lines_required!`](@ref) and [`selective_eval!`](@ref).
 """
 function lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges; kwargs...)
-    isrequired = falses(length(edges.preds))
+    isrequired = initialize_isrequired(length(src.code))
     objs = Set{GlobalRef}([obj])
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
 function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges; kwargs...)
-    isrequired = falses(length(edges.preds))
+    isrequired = initialize_isrequired(length(edges.preds))
     isrequired[idx] = true
     objs = Set{GlobalRef}()
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
 
 """
-    lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges;
+    lines_required!(isrequired::AbstractVector{Union{Bool,Symbol}}, src::CodeInfo, edges::CodeEdges;
                     norequire = ())
 
 Like `lines_required`, but where `isrequired[idx]` has already been set to `true` for all statements
@@ -602,7 +608,7 @@ should _not_ be marked as a requirement.
 For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src, edges)` if you're
 extracting method signatures and not evaluating new definitions.
 """
-function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges; kwargs...)
+function lines_required!(isrequired::AbstractVector{Union{Bool,Symbol}}, src::CodeInfo, edges::CodeEdges; kwargs...)
     objs = Set{GlobalRef}()
     return lines_required!(isrequired, objs, src, edges; kwargs...)
 end
@@ -624,7 +630,7 @@ function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
     return norequire
 end
 
-function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges; norequire = ())
+function lines_required!(isrequired::AbstractVector{Union{Bool,Symbol}}, objs, src::CodeInfo, edges::CodeEdges; norequire = ())
     # Mark any requested objects (their lines of assignment)
     objs = add_requests!(isrequired, objs, edges, norequire)
 
@@ -642,6 +648,9 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     iter = 0
     while changed
         changed = false
+        # @show iter
+        # print_with_code(stdout, src, isrequired)
+        # println()
 
         # Handle ssa predecessors
         changed |= add_ssa_preds!(isrequired, src, edges, norequire)
@@ -650,8 +659,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         changed |= add_named_dependencies!(isrequired, edges, objs, norequire)
 
         # Add control-flow
-        changed |= add_loops!(isrequired, cfg)
-        changed |= add_control_flow!(isrequired, cfg, domtree, postdomtree)
+        changed |= add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
 
         # So far, everything is generic graph traversal. Now we add some domain-specific information
         changed |= add_typedefs!(isrequired, src, edges, typedefs, norequire)
@@ -673,7 +681,7 @@ end
 function add_ssa_preds!(isrequired, src::CodeInfo, edges::CodeEdges, norequire)
     changed = false
     for idx = 1:length(src.code)
-        if isrequired[idx]
+        if isrequired[idx] == true
             changed |= add_preds!(isrequired, idx, edges, norequire)
         end
     end
@@ -684,7 +692,7 @@ function add_named_dependencies!(isrequired, edges::CodeEdges, objs, norequire)
     changed = false
     for (obj, uses) in edges.byname
         obj ∈ objs && continue
-        if any(view(isrequired, uses.succs))
+        if any(==(true), view(isrequired, uses.succs))
             changed |= add_obj!(isrequired, objs, obj, edges, norequire)
         end
     end
@@ -695,7 +703,7 @@ function add_preds!(isrequired, idx, edges::CodeEdges, norequire)
     chngd = false
     preds = edges.preds[idx]
     for p in preds
-        isrequired[p] && continue
+        isrequired[p] == true && continue
         p ∈ norequire && continue
         isrequired[p] = true
         chngd = true
@@ -706,7 +714,7 @@ end
 function add_succs!(isrequired, idx, edges::CodeEdges, succs, norequire)
     chngd = false
     for p in succs
-        isrequired[p] && continue
+        isrequired[p] == true && continue
         p ∈ norequire && continue
         isrequired[p] = true
         chngd = true
@@ -717,8 +725,9 @@ end
 function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
     chngd = false
     for d in edges.byname[obj].assigned
+        isrequired[d] == true && continue
         d ∈ norequire && continue
-        isrequired[d] || add_preds!(isrequired, d, edges, norequire)
+        add_preds!(isrequired, d, edges, norequire)
         isrequired[d] = true
         chngd = true
     end
@@ -728,70 +737,199 @@ end
 
 ## Add control-flow
 
-# Mark loops that contain evaluated statements
-function add_loops!(isrequired, cfg)
-    changed = false
-    for (ibb, bb) in enumerate(cfg.blocks)
-        needed = false
-        for ibbp in bb.preds
-            # Is there a backwards-pointing predecessor, and if so are there any required statements between the two?
-            ibbp > ibb || continue   # not a loop-block predecessor
-            r, rp = rng(bb), rng(cfg.blocks[ibbp])
-            r = first(r):first(rp)-1
-            needed |= any(view(isrequired, r))
-        end
-        if needed
-            # Mark the final statement of all predecessors
-            for ibbp in bb.preds
-                rp = rng(cfg.blocks[ibbp])
-                changed |= !isrequired[last(rp)]
-                isrequired[last(rp)] = true
-            end
-        end
+iscf(stmt) = isa(stmt, Core.GotoNode) || isa(stmt, Core.GotoIfNot) || isa(stmt, Core.ReturnNode)
+function jumps_back(src, i)
+    stmt = src.code[i]
+    (isa(stmt, Core.GotoNode) && stmt.label < i ||
+        isa(stmt, Core.GotoIfNot) && stmt.dest < i) && return true
+    if isa(stmt, Core.GotoIfNot) && i < length(src.code)
+        stmt = src.code[i+1]
+        isa(stmt, Core.GotoNode) && return stmt.label < i
     end
-    return changed
+    return false
 end
 
-function add_control_flow!(isrequired, cfg, domtree, postdomtree)
+function markcf!(isrequired, src, i)
+    stmt = src.code[i]
+    @assert iscf(stmt)
+    isrequired[i] ∈ (true, :exit) && return false
+    isrequired[i] = isa(stmt, Core.ReturnNode) ? :exit : true
+    return true
+end
+
+"""
+    ispredecessor(blocks, i, j)
+
+Determine whether block `i` is a predecessor of block `j` in the control-flow graph `blocks`.
+"""
+function ispredecessor(blocks, i, j, cache=Set{Int}())
+    for p in blocks[j].preds  # avoid putting `j` in the cache unless it loops back
+        getpreds!(cache, blocks, p)
+    end
+    return i ∈ cache
+end
+function getpreds!(cache, blocks, j)
+    if j ∈ cache
+        return cache
+    end
+    push!(cache, j)
+    for p in blocks[j].preds
+        getpreds!(cache, blocks, p)
+    end
+    return cache
+end
+
+function block_internals_needed(isrequired, src, r)
+    needed = false
+    for i in r
+        if isrequired[i] == true
+            iscf(src.code[i]) && continue
+            needed = true
+            break
+        end
+    end
+    return needed
+end
+
+function add_control_flow!(isrequired, src, cfg, domtree, postdomtree)
     changed, _changed = false, true
     blocks = cfg.blocks
-    nblocks = length(blocks)
+    needed = falses(length(blocks))
+    cache = Set{Int}()
     while _changed
         _changed = false
         for (ibb, bb) in enumerate(blocks)
             r = rng(bb)
-            if any(view(isrequired, r))
-                # Walk up the dominators
+            if block_internals_needed(isrequired, src, r)
+                needed[ibb] = true
+                # Check this block's precessors and mark any that are just control-flow
+                for p in bb.preds
+                    r = rng(blocks[p])
+                    if length(r) == 1 && iscf(src.code[r[1]])
+                        _changed |= markcf!(isrequired, src, r[1])
+                    end
+                end
+                # Check control flow that's needed to reach this block by walking up the dominators
                 jbb = ibb
                 while jbb != 1
-                    jdbb = domtree.idoms_bb[jbb]
+                    jdbb = domtree.idoms_bb[jbb]   # immediate dominator of jbb
                     dbb = blocks[jdbb]
-                    # Check the successors; if jbb doesn't post-dominate, mark the last statement
-                    for s in dbb.succs
-                        if !postdominates(postdomtree, jbb, s)
-                            idxlast = rng(dbb)[end]
-                            _changed |= !isrequired[idxlast]
-                            isrequired[idxlast] = true
-                            break
+                    idxlast = rng(dbb)[end]
+                    if iscf(src.code[idxlast])
+                        # Check the idom's successors; if jbb doesn't post-dominate, mark the last statement
+                        for s in dbb.succs
+                            if !postdominates(postdomtree, jbb, s)
+                                if markcf!(isrequired, src, idxlast)
+                                    _changed = true
+                                    break
+                                end
+                            end
                         end
                     end
                     jbb = jdbb
                 end
-                # Walk down the post-dominators, including self
+                # Walk down the post-dominators, starting with self
                 jbb = ibb
-                while jbb != 0 && jbb < nblocks
-                    pdbb = blocks[jbb]
-                    # Check if the exit of this block is a GotoNode or `return`
-                    if length(pdbb.succs) < 2
-                        idxlast = rng(pdbb)[end]
-                        _changed |= !isrequired[idxlast]
-                        isrequired[idxlast] = true
+                while jbb != 0
+                    if ispredecessor(blocks, jbb, ibb, empty!(cache))  # is post-dominator jbb also a predecessor of ibb? If so we have a loop.
+                        pdbb = blocks[jbb]
+                        r = rng(pdbb)
+                        # if block_internals_needed(isrequired, src, r)
+                            idxlast = rng(pdbb)[end]
+                            stmt = src.code[idxlast]
+                            if iscf(stmt) && jumps_back(src, idxlast)
+                                if isrequired[idxlast] != true
+                                    _changed = true
+                                    if isa(stmt, Core.ReturnNode) && isrequired[idxlast] != :exit
+                                        isrequired[idxlast] = :exit
+                                    else
+                                        isrequired[idxlast] = true
+                                        if isa(stmt, Core.GotoIfNot) && idxlast < length(isrequired) && isrequired[idxlast+1] != true && iscf(src.code[idxlast+1])
+                                            isrequired[idxlast+1] = true
+                                        end
+                                    end
+                                    break
+                                end
+                            end
+                        # end
                     end
                     jbb = postdomtree.idoms_bb[jbb]
                 end
             end
         end
         changed |= _changed
+    end
+    # Now handle "exclusions": in code that would inappropriately fall through
+    # during selective evaluation, find a post-dominator between the two that is
+    # marked, or mark one if absent.
+    marked = push!(findall(needed), length(blocks)+1)
+    for k in Iterators.drop(eachindex(marked), 1)
+        ibb, jbb = marked[k-1], marked[k]
+        if jbb <= length(blocks)
+            # are ibb and jbb exclusive?
+            ispredecessor(blocks, ibb, jbb, empty!(cache)) && continue
+        end
+        # Is there a required control-flow statement between ibb and jbb?
+        ok = false
+        ipbb = ibb
+        while ipbb < jbb
+            ipbb = postdomtree.idoms_bb[ipbb]
+            ipbb == 0 && break
+            idxlast = rng(blocks[ipbb])[end]
+            if iscf(src.code[idxlast]) && isrequired[idxlast] != false
+                ok = true
+                break
+            end
+        end
+        if !ok
+            # Mark a control-flow statement between ibb and jbb
+            ipbb = ibb
+            while ipbb < jbb
+                ipbb = postdomtree.idoms_bb[ipbb]
+                ipbb == 0 && break
+                # Mark the ipostdom's predecessors...
+                for k in blocks[ipbb].preds
+                    idxlast = rng(blocks[k])[end]
+                    stmt = src.code[idxlast]
+                    if iscf(stmt)
+                        if markcf!(isrequired, src, idxlast)
+                            changed = true
+                            ok = true
+                            if isa(stmt, Core.GotoIfNot) && idxlast < length(isrequired) && isrequired[idxlast+1] != true && iscf(src.code[idxlast+1])
+                                isrequired[idxlast+1] = true
+                            end
+                        end
+                    end
+                end
+                # ...or the ipostdom itself
+                if !ok
+                    idxlast = rng(blocks[ipbb])[end]
+                    stmt = src.code[idxlast]
+                    if isa(stmt, Core.GotoNode) || isa(stmt, Core.ReturnNode)  # unconditional jump
+                        if markcf!(isrequired, src, idxlast)
+                            changed = true
+                            ok = true
+                        end
+                    end
+                    # r = rng(blocks[ipbb])
+                    # if length(r) == 1 && iscf(src.code[r[1]])
+                    #     if markcf!(isrequired, src, r[1])
+                    #         changed = true
+                    #         ok = true
+                    #     end
+                    # end
+                end
+                # idxlast = rng(blocks[ipbb])[end]
+                # if iscf(src.code[idxlast])    # ideally we might find an unconditional jump to prevent unnecessary evaluation of the conditional
+                #     if markcf!(isrequired, src, idxlast)
+                #         changed = true
+                #         ok = true
+                #         break
+                #     end
+                # end
+            end
+        end
+        jbb <= length(blocks) && @assert ok
     end
     return changed
 end
@@ -829,11 +967,11 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
     idx = 1
     while idx < length(stmts)
         stmt = stmts[idx]
-        isrequired[idx] || (idx += 1; continue)
+        isrequired[idx] == true || (idx += 1; continue)
         for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
-            if idx ∈ typedefr
+            if idx ∈ typedefr && !iscf(stmt)  # exclude control-flow nodes since they may be needed for other purposes
                 ireq = view(isrequired, typedefr)
-                if !all(ireq)
+                if !all(==(true), ireq)
                     changed = true
                     ireq .= true
                     # Also mark any by-type constructor(s) associated with this typedef
@@ -861,8 +999,10 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
             if i <= length(stmts) && (stmts[i]::Expr).args[1] == false
                 tpreds = terminal_preds(i, edges)
                 if minimum(tpreds) == idx && i ∉ norequire
-                    changed |= !isrequired[i]
-                    isrequired[i] = true
+                    if isrequired[i] != true
+                        changed = true
+                        isrequired[i] = true
+                    end
                 end
             end
         end
@@ -881,15 +1021,17 @@ function add_inplace!(isrequired, src, edges, norequire)
             callee_matches(fname, Base, :pop!) ||
             callee_matches(fname, Base, :empty!) ||
             callee_matches(fname, Base, :setindex!))
-            _changed = !isrequired[j]
-            isrequired[j] = true
+            if isrequired[j] != true
+                _changed = true
+               isrequired[j] = true
+            end
         end
         return _changed
     end
 
     changed = false
     for (i, isreq) in pairs(isrequired)
-        isreq || continue
+        isreq == true || continue
         for j in edges.succs[i]
             j ∈ norequire && continue
             stmt = src.code[j]
@@ -934,14 +1076,16 @@ This will return either a `BreakpointRef`, the value obtained from the last exec
 (if stored to `frame.framedata.ssavlues`), or `nothing`.
 Typically, assignment to a variable binding does not result in an ssa store by JuliaInterpreter.
 """
-function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
+function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired, istoplevel::Bool=false)
     pc = pcexec = pclast = frame.pc
     while isa(pc, Int)
         frame.pc = pc
         te = isrequired[pc]
         pclast = pcexec::Int
-        if te
+        if te == true
             pcexec = pc = step_expr!(recurse, frame, istoplevel)
+        elseif te == :exit
+            pc = nothing
         else
             pc = next_or_nothing!(recurse, frame)
         end
@@ -950,11 +1094,11 @@ function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::Abstr
     pcexec = (pcexec === nothing ? pclast : pcexec)::Int
     frame.pc = pcexec
     node = pc_expr(frame)
-    is_return(node) && return isrequired[pcexec] ? lookup_return(frame, node) : nothing
+    is_return(node) && return isrequired[pcexec] == true ? lookup_return(frame, node) : nothing
     isassigned(frame.framedata.ssavalues, pcexec) && return frame.framedata.ssavalues[pcexec]
     return nothing
 end
-function selective_eval!(frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
+function selective_eval!(frame::Frame, isrequired, istoplevel::Bool=false)
     selective_eval!(finish_and_return!, frame, isrequired, istoplevel)
 end
 
@@ -963,18 +1107,18 @@ end
 
 Like [`selective_eval!`](@ref), except it sets `frame.pc` to the first `true` statement in `isrequired`.
 """
-function selective_eval_fromstart!(@nospecialize(recurse), frame, isrequired, istoplevel::Bool=false)
+function selective_eval_fromstart!(@nospecialize(recurse), frame::Frame, isrequired, istoplevel::Bool=false)
     pc = findfirst(isrequired)
     pc === nothing && return nothing
     frame.pc = pc
     return selective_eval!(recurse, frame, isrequired, istoplevel)
 end
-function selective_eval_fromstart!(frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
+function selective_eval_fromstart!(frame::Frame, isrequired, istoplevel::Bool=false)
     selective_eval_fromstart!(finish_and_return!, frame, isrequired, istoplevel)
 end
 
 """
-    print_with_code(io, src::CodeInfo, isrequired::AbstractVector{Bool})
+    print_with_code(io, src::CodeInfo, isrequired::AbstractVector{Union{Bool,Symbol}})
 
 Mark each line of code with its requirement status.
 
@@ -982,10 +1126,13 @@ Mark each line of code with its requirement status.
     This function produces dummy output if suitable support is missing in your version of Julia.
 
 """
-function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool})
+function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Union{Bool,Symbol}})
+    function markchar(c)
+        return c === true ? 't' : (c === false ? 'f' : (c === :exit ? 'e' : 'x'))
+    end
     nd = ndigits(length(isrequired))
     preprint(::IO) = nothing
-    preprint(io::IO, idx::Int) = (c = isrequired[idx]; printstyled(io, lpad(idx, nd), ' ', c ? "t " : "f "; color = c ? :cyan : :plain))
+    preprint(io::IO, idx::Int) = (c = markchar(isrequired[idx]); printstyled(io, lpad(idx, nd), ' ', c; color = c ∈ ('t', 'e') ? :cyan : :plain))
     postprint(::IO) = nothing
     postprint(io::IO, idx::Int, bbchanged::Bool) = nothing
 
