@@ -943,7 +943,7 @@ function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::Abstr
         if te
             pcexec = pc = step_expr!(recurse, frame, istoplevel)
         else
-            pc = next_or_nothing!(frame)
+            pc = next_or_nothing!(recurse, frame)
         end
     end
     isa(pc, BreakpointRef) && return pc

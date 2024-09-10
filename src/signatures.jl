@@ -493,7 +493,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         sigt, pc = signature(recurse, frame, stmt, pc)
         meth = whichtt(sigt)
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
-            pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame)
+            pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(recurse, frame)
         elseif define
             pc = step_expr!(recurse, frame, stmt, true)
             meth = whichtt(sigt)
@@ -517,7 +517,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
                     @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
                 end
                 if pc == pc3
-                    pc = next_or_nothing!(frame)
+                    pc = next_or_nothing!(recurse, frame)
                 end
             end
         end
@@ -560,7 +560,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
         frame.pc = pc
-        pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(frame)
+        pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(recurse, frame)
         meth = whichtt(sigt)
         isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
         name === name3 && return pc, pc3     # if this was an inner method we should keep going
