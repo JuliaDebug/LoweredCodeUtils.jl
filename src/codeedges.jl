@@ -108,7 +108,7 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
         :displaysize=>displaysize(io),
         :SOURCE_SLOTNAMES => Base.sourceinfo_slotnames(src))
     used = BitSet()
-    cfg = Core.Compiler.compute_basic_blocks(src.code)
+    cfg = compute_basic_blocks(src.code)
     for stmt in src.code
         Core.Compiler.scan_ssa_use!(push!, used, stmt)
     end
@@ -629,8 +629,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     objs = add_requests!(isrequired, objs, edges, norequire)
 
     # Compute basic blocks, which we'll use to make sure we mark necessary control-flow
-    cfg = Core.Compiler.compute_basic_blocks(src.code)  # needed for control-flow analysis
-    domtree = construct_domtree(cfg.blocks)
+    cfg = compute_basic_blocks(src.code)  # needed for control-flow analysis
     postdomtree = construct_postdomtree(cfg.blocks)
 
     # We'll mostly use generic graph traversal to discover all the lines we need,
@@ -651,7 +650,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 
         # Add control-flow
         changed |= add_loops!(isrequired, cfg)
-        changed |= add_control_flow!(isrequired, cfg, domtree, postdomtree)
+        changed |= add_control_flow!(isrequired, src, cfg, postdomtree)
 
         # So far, everything is generic graph traversal. Now we add some domain-specific information
         changed |= add_typedefs!(isrequired, src, edges, typedefs, norequire)
@@ -659,6 +658,10 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
 
         iter += 1  # just for diagnostics
     end
+
+    # now mark the active goto nodes
+    add_active_gotos!(isrequired, src, cfg, postdomtree)
+
     return isrequired
 end
 
@@ -752,48 +755,140 @@ function add_loops!(isrequired, cfg)
     return changed
 end
 
-function add_control_flow!(isrequired, cfg, domtree, postdomtree)
-    changed, _changed = false, true
-    blocks = cfg.blocks
-    nblocks = length(blocks)
-    while _changed
-        _changed = false
-        for (ibb, bb) in enumerate(blocks)
-            r = rng(bb)
-            if any(view(isrequired, r))
-                # Walk up the dominators
-                jbb = ibb
-                while jbb != 1
-                    jdbb = domtree.idoms_bb[jbb]
-                    dbb = blocks[jdbb]
-                    # Check the successors; if jbb doesn't post-dominate, mark the last statement
-                    for s in dbb.succs
-                        if !postdominates(postdomtree, jbb, s)
-                            idxlast = rng(dbb)[end]
-                            _changed |= !isrequired[idxlast]
-                            isrequired[idxlast] = true
-                            break
-                        end
-                    end
-                    jbb = jdbb
-                end
-                # Walk down the post-dominators, including self
-                jbb = ibb
-                while jbb != 0 && jbb < nblocks
-                    pdbb = blocks[jbb]
-                    # Check if the exit of this block is a GotoNode or `return`
-                    if length(pdbb.succs) < 2
-                        idxlast = rng(pdbb)[end]
-                        _changed |= !isrequired[idxlast]
-                        isrequired[idxlast] = true
-                    end
-                    jbb = postdomtree.idoms_bb[jbb]
+using Core: CodeInfo
+using Core.Compiler: CFG, BasicBlock, compute_basic_blocks
+
+# The goal of this function is to request concretization of the minimal necessary control
+# flow to evaluate statements whose concretization have already been requested.
+# The basic algorithm is based on what was proposed in [^Wei84]. If there is even one active
+# block in the blocks reachable from a conditional branch up to its successors' nearest
+# common post-dominator (referred to as 𝑰𝑵𝑭𝑳 in the paper), it is necessary to follow
+# that conditional branch and execute the code. Otherwise, execution can be short-circuited
+# from the conditional branch to the nearest common post-dominator.
+#
+# COMBAK: It is important to note that in Julia's intermediate code representation (`CodeInfo`),
+# "short-circuiting" a specific code region is not a simple task. Simply ignoring the path
+# to the post-dominator does not guarantee fall-through to the post-dominator. Therefore,
+# a more careful implementation is required for this aspect.
+#
+# [Wei84]: M. Weiser, "Program Slicing," IEEE Transactions on Software Engineering, 10, pages 352-357, July 1984.
+function add_control_flow!(isrequired, src::CodeInfo, cfg::CFG, postdomtree)
+    local changed::Bool = false
+    function mark_isrequired!(idx::Int)
+        if !isrequired[idx]
+            changed |= isrequired[idx] = true
+            return true
+        end
+        return false
+    end
+    for bbidx = 1:length(cfg.blocks) # forward traversal
+        bb = cfg.blocks[bbidx]
+        nsuccs = length(bb.succs)
+        if nsuccs == 0
+            continue
+        elseif nsuccs == 1
+            continue # leave a fall-through terminator unmarked: `GotoNode`s are marked later
+        elseif nsuccs == 2
+            termidx = bb.stmts[end]
+            @assert is_conditional_terminator(src.code[termidx]) "invalid IR"
+            if is_conditional_block_active(isrequired, bb, cfg, postdomtree)
+                mark_isrequired!(termidx)
+            else
+                # fall-through to the post dominator block (by short-circuiting all statements between)
+            end
+        end
+    end
+    return changed
+end
+
+is_conditional_terminator(@nospecialize stmt) = stmt isa GotoIfNot ||
+    (@static @isdefined(EnterNode) ? stmt isa EnterNode : isexpr(stmt, :enter))
+
+function is_conditional_block_active(isrequired, bb::BasicBlock, cfg::CFG, postdomtree)
+    return visit_𝑰𝑵𝑭𝑳_blocks(bb, cfg, postdomtree) do postdominator::Int, 𝑰𝑵𝑭𝑳::BitSet
+        for blk in 𝑰𝑵𝑭𝑳
+            if blk == postdominator
+                continue # skip the post-dominator block and continue to a next infl block
+            end
+            if any(@view isrequired[cfg.blocks[blk].stmts])
+                return true
+            end
+        end
+        return false
+    end
+end
+
+function visit_𝑰𝑵𝑭𝑳_blocks(func, bb::BasicBlock, cfg::CFG, postdomtree)
+    succ1, succ2 = bb.succs
+    postdominator = nearest_common_dominator(postdomtree, succ1, succ2)
+    𝑰𝑵𝑭𝑳 = reachable_blocks(cfg, succ1, postdominator) ∪ reachable_blocks(cfg, succ2, postdominator)
+    return func(postdominator, 𝑰𝑵𝑭𝑳)
+end
+
+function reachable_blocks(cfg, from_bb::Int, to_bb::Int)
+    worklist = Int[from_bb]
+    visited = BitSet(from_bb)
+    if to_bb == from_bb
+        return visited
+    end
+    push!(visited, to_bb)
+    function visit!(bb::Int)
+        if bb ∉ visited
+            push!(visited, bb)
+            push!(worklist, bb)
+        end
+    end
+    while !isempty(worklist)
+        foreach(visit!, cfg.blocks[pop!(worklist)].succs)
+    end
+    return visited
+end
+
+function add_active_gotos!(isrequired, src::CodeInfo, cfg::CFG, postdomtree)
+    dead_blocks = compute_dead_blocks(isrequired, src, cfg, postdomtree)
+    changed = false
+    for bbidx = 1:length(cfg.blocks)
+        if bbidx ∉ dead_blocks
+            bb = cfg.blocks[bbidx]
+            nsuccs = length(bb.succs)
+            if nsuccs == 1
+                termidx = bb.stmts[end]
+                if src.code[termidx] isa GotoNode
+                    changed |= isrequired[termidx] = true
                 end
             end
         end
-        changed |= _changed
     end
     return changed
+end
+
+# find dead blocks using the same approach as `add_control_flow!`, for the converged `isrequired`
+function compute_dead_blocks(isrequired, src::CodeInfo, cfg::CFG, postdomtree)
+    dead_blocks = BitSet()
+    for bbidx = 1:length(cfg.blocks)
+        bb = cfg.blocks[bbidx]
+        nsuccs = length(bb.succs)
+        if nsuccs == 2
+            termidx = bb.stmts[end]
+            @assert is_conditional_terminator(src.code[termidx]) "invalid IR"
+            visit_𝑰𝑵𝑭𝑳_blocks(bb, cfg, postdomtree) do postdominator::Int, 𝑰𝑵𝑭𝑳::BitSet
+                is_𝑰𝑵𝑭𝑳_active = false
+                for blk in 𝑰𝑵𝑭𝑳
+                    if blk == postdominator
+                        continue # skip the post-dominator block and continue to a next infl block
+                    end
+                    if any(@view isrequired[cfg.blocks[blk].stmts])
+                        is_𝑰𝑵𝑭𝑳_active |= true
+                        break
+                    end
+                end
+                if !is_𝑰𝑵𝑭𝑳_active
+                    union!(dead_blocks, delete!(𝑰𝑵𝑭𝑳, postdominator))
+                end
+            end
+        end
+    end
+    return dead_blocks
 end
 
 # Do a traveral of "numbered" predecessors and find statement ranges and names of type definitions
