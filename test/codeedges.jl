@@ -6,7 +6,7 @@ using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
-function hastrackedexpr(stmt; heads=LoweredCodeUtils.trackedheads)
+function hastrackedexpr(@nospecialize(stmt); heads=LoweredCodeUtils.trackedheads)
     haseval = false
     if isa(stmt, Expr)
         if stmt.head === :call
@@ -241,7 +241,7 @@ module ModSelective end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod_with_name(src, stmt, "NoParam"),false), src, edges)  # initially mark only the constructor
+    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod_with_name(src, stmt, "NoParam"),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     @test isa(ModSelective.NoParam(), ModSelective.NoParam)
     # Parametric
@@ -253,7 +253,7 @@ module ModSelective end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod_with_name(src, stmt, "Struct"),false), src, edges)  # initially mark only the constructor
+    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod_with_name(src, stmt, "Struct"),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     @test isa(ModSelective.Struct([1,2,3]), ModSelective.Struct{Int})
     # Keyword constructor (this generates :copyast expressions)
@@ -270,7 +270,7 @@ module ModSelective end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges)  # initially mark only the constructor
+    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges)  # initially mark only the constructor
     selective_eval_fromstart!(frame, isrequired, true)
     kws = ModSelective.KWStruct(y=5.0f0)
     @test kws.y === 5.0f0
@@ -302,7 +302,7 @@ module ModSelective end
     frame = Frame(ModEval, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModEval, src)
-    isrequired = minimal_evaluation(stmt->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src, edges))  # initially mark only the constructor
+    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src, edges))  # initially mark only the constructor
     bbs = Core.Compiler.compute_basic_blocks(src.code)
     for (iblock, block) in enumerate(bbs.blocks)
         r = LoweredCodeUtils.rng(block)
@@ -339,9 +339,9 @@ module ModSelective end
     end)
     src = thk.args[1]
     edges = CodeEdges(Main, src)
-    idx = findfirst(stmt->Meta.isexpr(stmt, :method), src.code)
+    idx = findfirst(@nospecialize(stmt)->Meta.isexpr(stmt, :method), src.code)
     lr = lines_required(idx, src, edges; norequire=exclude_named_typedefs(src, edges))
-    idx = findfirst(stmt->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
+    idx = findfirst(@nospecialize(stmt)->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
     @test lr[idx]
     # but make sure we don't break primitivetype & abstracttype (https://github.com/timholy/Revise.jl/pull/611)
     if isdefined(Core, :_primitivetype)

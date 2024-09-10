@@ -426,7 +426,7 @@ end
 function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
     nameinfo = find_name_caller_sig(recurse, frame, pc, name, parentname)
     if nameinfo === nothing
-        pc = skip_until(stmt->isexpr(stmt, :method, 3), frame, pc)
+        pc = skip_until(@nospecialize(stmt)->isexpr(stmt, :method, 3), frame, pc)
         pc = next_or_nothing(frame, pc)
         return name, pc, nothing
     end
