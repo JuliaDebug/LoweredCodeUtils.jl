@@ -202,49 +202,6 @@ function typedef_range(src::CodeInfo, idx)
     return istart:iend-1
 end
 
-"""
-    nextpc = next_or_nothing(frame, pc)
-    nextpc = next_or_nothing!(frame)
-
-Advance the program counter without executing the corresponding line.
-If `frame` is finished, `nextpc` will be `nothing`.
-"""
-next_or_nothing(frame, pc) = pc < nstatements(frame.framecode) ? pc+1 : nothing
-next_or_nothing!(frame) = next_or_nothing!(finish_and_return!, frame)
-function next_or_nothing!(@nospecialize(recurse), frame)
-    pc = frame.pc
-    if pc < nstatements(frame.framecode)
-        return frame.pc = pc + 1
-    end
-    return nothing
-end
-
-"""
-    nextpc = skip_until(predicate, frame, pc)
-    nextpc = skip_until!(predicate, frame)
-
-Advance the program counter until `predicate(stmt)` return `true`.
-"""
-function skip_until(predicate, frame, pc)
-    stmt = pc_expr(frame, pc)
-    while !predicate(stmt)
-        pc = next_or_nothing(frame, pc)
-        pc === nothing && return nothing
-        stmt = pc_expr(frame, pc)
-    end
-    return pc
-end
-function skip_until!(predicate, frame)
-    pc = frame.pc
-    stmt = pc_expr(frame, pc)
-    while !predicate(stmt)
-        pc = next_or_nothing!(frame)
-        pc === nothing && return nothing
-        stmt = pc_expr(frame, pc)
-    end
-    return pc
-end
-
 function sparam_ub(meth::Method)
     typs = []
     sig = meth.sig

@@ -363,7 +363,7 @@ function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentnam
     while true
         pc0 = pc
         while !ismethod3(stmt)
-            pc = next_or_nothing(frame, pc)
+            pc = next_or_nothing(recurse, frame, pc)
             pc === nothing && return nothing
             stmt = pc_expr(frame, pc)
         end
@@ -381,7 +381,7 @@ function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentnam
                 iscallto(bodystmt, moduleof(frame), name, body) && return signature_top(frame, stmt, pc), false
             end
         end
-        pc = next_or_nothing(frame, pc)
+        pc = next_or_nothing(recurse, frame, pc)
         pc === nothing && return nothing
         stmt = pc_expr(frame, pc)
     end
@@ -427,7 +427,7 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
     nameinfo = find_name_caller_sig(recurse, frame, pc, name, parentname)
     if nameinfo === nothing
         pc = skip_until(@nospecialize(stmt)->isexpr(stmt, :method, 3), frame, pc)
-        pc = next_or_nothing(frame, pc)
+        pc = next_or_nothing(recurse, frame, pc)
         return name, pc, nothing
     end
     pctop, isgen = nameinfo
@@ -459,6 +459,52 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
         cname = ref
     end
     return cname, pc, lastpcparent
+end
+
+"""
+    nextpc = next_or_nothing([recurse], frame, pc)
+    nextpc = next_or_nothing!([recurse], frame)
+
+Advance the program counter without executing the corresponding line.
+If `frame` is finished, `nextpc` will be `nothing`.
+"""
+next_or_nothing(frame, pc) = next_or_nothing(finish_and_return!, frame, pc)
+next_or_nothing(@nospecialize(recurse), frame, pc) = pc < nstatements(frame.framecode) ? pc+1 : nothing
+next_or_nothing!(frame) = next_or_nothing!(finish_and_return!, frame)
+function next_or_nothing!(@nospecialize(recurse), frame)
+    pc = frame.pc
+    if pc < nstatements(frame.framecode)
+        return frame.pc = pc + 1
+    end
+    return nothing
+end
+
+"""
+    nextpc = skip_until(predicate, [recurse], frame, pc)
+    nextpc = skip_until!(predicate, [recurse], frame)
+
+Advance the program counter until `predicate(stmt)` return `true`.
+"""
+skip_until(predicate, frame, pc) = skip_until(predicate, finish_and_return!, frame, pc)
+function skip_until(predicate, @nospecialize(recurse), frame, pc)
+    stmt = pc_expr(frame, pc)
+    while !predicate(stmt)
+        pc = next_or_nothing(recurse, frame, pc)
+        pc === nothing && return nothing
+        stmt = pc_expr(frame, pc)
+    end
+    return pc
+end
+skip_until!(predicate, frame) = skip_until!(predicate, finish_and_return!, frame)
+function skip_until!(predicate, @nospecialize(recurse), frame)
+    pc = frame.pc
+    stmt = pc_expr(frame, pc)
+    while !predicate(stmt)
+        pc = next_or_nothing!(recurse, frame)
+        pc === nothing && return nothing
+        stmt = pc_expr(frame, pc)
+    end
+    return pc
 end
 
 """
@@ -549,14 +595,14 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         sigt, pc = signature(recurse, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
-            pc = next_or_nothing(frame, pc)  # this should not check define, we've probably already done this once
+            pc = next_or_nothing(recurse, frame, pc)  # this should not check define, we've probably already done this once
             pc === nothing && return nothing   # this was just `function foo end`, signal "no def"
             stmt = pc_expr(frame, pc)
         end
         pc3 = pc
         stmt = stmt::Expr
         name3 = normalize_defsig(stmt.args[1], frame)
-        sigt === nothing && (error("expected a signature"); return next_or_nothing(frame, pc)), pc3
+        sigt === nothing && (error("expected a signature"); return next_or_nothing(recurse, frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
         frame.pc = pc
