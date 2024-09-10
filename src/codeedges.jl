@@ -649,7 +649,6 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
         changed |= add_named_dependencies!(isrequired, edges, objs, norequire)
 
         # Add control-flow
-        changed |= add_loops!(isrequired, cfg)
         changed |= add_control_flow!(isrequired, src, cfg, postdomtree)
 
         # So far, everything is generic graph traversal. Now we add some domain-specific information
@@ -730,30 +729,6 @@ function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
 end
 
 ## Add control-flow
-
-# Mark loops that contain evaluated statements
-function add_loops!(isrequired, cfg)
-    changed = false
-    for (ibb, bb) in enumerate(cfg.blocks)
-        needed = false
-        for ibbp in bb.preds
-            # Is there a backwards-pointing predecessor, and if so are there any required statements between the two?
-            ibbp > ibb || continue   # not a loop-block predecessor
-            r, rp = rng(bb), rng(cfg.blocks[ibbp])
-            r = first(r):first(rp)-1
-            needed |= any(view(isrequired, r))
-        end
-        if needed
-            # Mark the final statement of all predecessors
-            for ibbp in bb.preds
-                rp = rng(cfg.blocks[ibbp])
-                changed |= !isrequired[last(rp)]
-                isrequired[last(rp)] = true
-            end
-        end
-    end
-    return changed
-end
 
 using Core: CodeInfo
 using Core.Compiler: CFG, BasicBlock, compute_basic_blocks
