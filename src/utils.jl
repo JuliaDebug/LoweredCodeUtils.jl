@@ -210,7 +210,7 @@ Advance the program counter without executing the corresponding line.
 If `frame` is finished, `nextpc` will be `nothing`.
 """
 next_or_nothing(frame, pc) = pc < nstatements(frame.framecode) ? pc+1 : nothing
-next_or_nothing!(frame) = next_or_nothing(finish_and_return!, frame)
+next_or_nothing!(frame) = next_or_nothing!(finish_and_return!, frame)
 function next_or_nothing!(@nospecialize(recurse), frame)
     pc = frame.pc
     if pc < nstatements(frame.framecode)
