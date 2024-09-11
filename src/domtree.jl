@@ -412,3 +412,30 @@ function _dominates(domtree::GenericDomTree, bb1::BBNumber, bb2::BBNumber)
     end
     return bb1 == bb2
 end
+
+"""
+    nearest_common_dominator(domtree::GenericDomTree, a::BBNumber, b::BBNumber)
+
+Compute the nearest common (post-)dominator of `a` and `b`.
+"""
+function nearest_common_dominator(domtree::GenericDomTree, a::BBNumber, b::BBNumber)
+    a == 0 && return a
+    b == 0 && return b
+    alevel = domtree.nodes[a].level
+    blevel = domtree.nodes[b].level
+    # W.l.g. assume blevel <= alevel
+    if alevel < blevel
+        a, b = b, a
+        alevel, blevel = blevel, alevel
+    end
+    while alevel > blevel
+        a = domtree.idoms_bb[a]
+        alevel -= 1
+    end
+    while a != b && a != 0
+        a = domtree.idoms_bb[a]
+        b = domtree.idoms_bb[b]
+    end
+    @assert a == b
+    return a
+end

@@ -2,7 +2,8 @@ if isdefined(Base, :Experimental) && isdefined(Base.Experimental, Symbol("@optle
     @eval Base.Experimental.@optlevel 1
 end
 
-using Core: SimpleVector, CodeInfo, NewvarNode, GotoNode
+using Core: SimpleVector
+using Core.IR
 using Base.Meta: isexpr
 
 const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
@@ -22,6 +23,7 @@ else
     const construct_domtree = Core.Compiler.construct_domtree
     const construct_postdomtree = Core.Compiler.construct_postdomtree
     const postdominates = Core.Compiler.postdominates
+    const nearest_common_dominator = Core.Compiler.nearest_common_dominator
 end
 
 # precompilation
