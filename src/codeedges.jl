@@ -173,7 +173,6 @@ function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks, bbc
     return nothing
 end
 
-
 function namedkeys(cl::CodeLinks)
     ukeys = Set{GlobalRef}()
     for c in (cl.namepreds, cl.namesuccs, cl.nameassigns)
@@ -390,7 +389,6 @@ function Base.show(io::IO, edges::CodeEdges)
     return nothing
 end
 
-
 """
     edges = CodeEdges(src::CodeInfo)
 
@@ -563,7 +561,6 @@ function terminal_preds!(s, j, edges, covered)  # can't be an inner function bec
     end
     return s
 end
-
 
 """
     isrequired = lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges)
