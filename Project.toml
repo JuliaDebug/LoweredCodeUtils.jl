@@ -7,7 +7,7 @@ version = "3.0.2"
 JuliaInterpreter = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
 
 [compat]
-JuliaInterpreter = "0.9"
+JuliaInterpreter = "0.9.36"
 julia = "1.6"
 
 [extras]
