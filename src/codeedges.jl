@@ -116,7 +116,7 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
         sptypes = let parent = src.parent
             parent isa MethodInstance ?
                 Core.Compiler.sptypes_from_meth_instance(parent) :
-                Core.Compiler.EMPTY_SPTYPESd
+                Core.Compiler.EMPTY_SPTYPES
         end
     end
     line_info_preprinter = Base.IRShow.lineinfo_disabled
