@@ -112,11 +112,12 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
     for stmt in src.code
         Core.Compiler.scan_ssa_use!(push!, used, stmt)
     end
-    @static if VERSION > v"1.11" && __has_internal_change(v"1.12-alpha", :printcodeinfocalls)
-        parent = src.parent
-        sptypes = if parent isa MethodInstance
-            Core.Compiler.sptypes_from_meth_instance(parent)
-        else Core.Compiler.EMPTY_SPTYPES end
+    @static if isdefined(Base, :__has_internal_change) && Base.__has_internal_change(v"1.12-alpha", :printcodeinfocalls)
+        sptypes = let parent = src.parent
+            parent isa MethodInstance ?
+                Core.Compiler.sptypes_from_meth_instance(parent) :
+                Core.Compiler.EMPTY_SPTYPESd
+        end
     end
     line_info_preprinter = Base.IRShow.lineinfo_disabled
     line_info_postprinter = Base.IRShow.default_expr_type_printer
@@ -124,7 +125,7 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
     bb_idx_prev = bb_idx = 1
     for idx = 1:length(src.code)
         preprint(io, idx)
-        @static if VERSION > v"1.11" && __has_internal_change(v"1.12-alpha", :printcodeinfocalls)
+        @static if isdefined(Base, :__has_internal_change) && Base.__has_internal_change(v"1.12-alpha", :printcodeinfocalls)
             bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, sptypes, used, cfg, bb_idx)
         else
             bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
