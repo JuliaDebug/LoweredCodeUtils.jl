@@ -282,7 +282,7 @@ module ModSelective end
     edges = CodeEdges(ModSelective, src)
     isrequired = fill(false, length(src.code))
     j = length(src.code) - 1
-    if !Meta.isexpr(src.code[end-1], :method, 3)
+    while !Meta.isexpr(src.code[j], :method, 3)
         j -= 1
     end
     @assert Meta.isexpr(src.code[j], :method, 3)
@@ -352,7 +352,8 @@ module ModSelective end
         edges = CodeEdges(Main, src)
         idx = findfirst(istypedef, src.code)
         r = LoweredCodeUtils.typedef_range(src, idx)
-        @test last(r) == length(src.code) - 1
+        # 1 before :latestworld, 2 after
+        @test (length(src.code) - last(r)) in (1, 2)
     end
 
     @testset "Display" begin
