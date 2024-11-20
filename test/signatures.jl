@@ -415,9 +415,10 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     oldenv = Pkg.project().path
     try
         # we test with the old version of CBinding, let's do it in an isolated environment
+        # so we don't cause package conflicts with everything else
         Pkg.activate(; temp=true, io=devnull)
 
-        @info "Adding CBinding to the environment for test purposes"
+        @info "Adding CBinding v0.9.4 to the environment for test purposes"
         Pkg.add(; name="CBinding", version="0.9.4", io=devnull) # `@cstruct` isn't defined for v1.0 and above
 
         m = Module()

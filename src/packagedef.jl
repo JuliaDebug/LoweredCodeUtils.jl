@@ -12,7 +12,8 @@ const trackedheads = (:method,)
 const structdecls = (:_structtype, :_abstracttype, :_primitivetype)
 
 export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod
-export CodeEdges, lines_required, lines_required!, selective_eval!, selective_eval_fromstart!
+export CodeEdges, SelectiveEvalController,
+       lines_required, lines_required!, selective_eval!, selective_eval_fromstart!
 
 include("utils.jl")
 include("signatures.jl")
