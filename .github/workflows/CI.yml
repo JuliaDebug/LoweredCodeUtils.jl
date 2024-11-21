@@ -9,23 +9,35 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.6'     # current LTS
-          - '1'       # latest stable
-        os:
-          - ubuntu-latest
-          - macOS-latest
-          - windows-latest
-        arch:
-          - x64
         include:
-          - version: 'nightly'
+          - version: '1' # current stable
             os: ubuntu-latest
             arch: x64
-            allow_failures: true
+          - version: '1.10' # lowest version supported
+            os: ubuntu-latest
+            arch: x64
+          - version: '1.12-nightly' # next release
+            os: ubuntu-latest
+            arch: x64
+          - version: 'nightly' # dev
+            os: ubuntu-latest
+            arch: x64
+          #- version: '1' # x86 ubuntu -- disabled since PyCall/conda is broken on this platform
+          #  os: ubuntu-latest
+          #  arch: x86
+          - version: '1' # x86 windows
+            os: windows-latest
+            arch: x86
+          - version: '1' # x64 windows
+            os: windows-latest
+            arch: x64
+          - version: '1' # x64 macOS
+            os: macos-latest
+            arch: x64
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2

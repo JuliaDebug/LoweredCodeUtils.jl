@@ -281,7 +281,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     rename_framemethods!(frame)
     empty!(signatures)
     methoddefs!(signatures, frame; define=false)
-    @test length(signatures) >= 3 - isdefined(Core, :kwcall)
+    @test length(signatures) >= 2
 
     ex = :(typedsig(x) = 1)
     frame = Frame(Lowering, ex)
@@ -353,10 +353,6 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     @test dct[ks[1]] == dct[ks[2]]
     @test ks[1].mod === ks[2].mod === Lowering
     @test isdefined(Lowering, ks[1].name) || isdefined(Lowering, ks[2].name)
-    if !isdefined(Core, :kwcall)
-        nms = filter(sym->occursin(r"#Items#\d+#\d+", String(sym)), names(Lowering; all=true))
-        @test length(nms) == 1
-    end
 
     # https://github.com/timholy/Revise.jl/issues/422
     ex = :(@generated function fneg(x::T) where T<:LT{<:FloatingTypes}

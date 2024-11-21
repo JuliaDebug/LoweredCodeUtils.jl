@@ -118,17 +118,13 @@ function isanonymous_typedef(stmt)
         stmt = src.code[end-1]
         isexpr(stmt, :call) || return false
         is_global_ref(stmt.args[1], Core, :_typebody!) || return false
-        @static if VERSION ≥ v"1.9.0-DEV.391"
-            stmt = isa(stmt.args[3], Core.SSAValue) ? src.code[end-3] : src.code[end-2]
-            is_assignment_like(stmt) || return false
-            name = stmt.args[1]
-            if isa(name, GlobalRef)
-                name = name.name
-            else
-                isa(name, Symbol) || return false
-            end
+        stmt = isa(stmt.args[3], Core.SSAValue) ? src.code[end-3] : src.code[end-2]
+        is_assignment_like(stmt) || return false
+        name = stmt.args[1]
+        if isa(name, GlobalRef)
+            name = name.name
         else
-            name = stmt.args[2]::Symbol
+            isa(name, Symbol) || return false
         end
         return startswith(String(name), "#")
     end
@@ -176,11 +172,9 @@ function typedef_range(src::CodeInfo, idx)
         if isa(stmt, Expr)
             stmt.head === :global && break
             if stmt.head === :call
-                if (is_global_ref(stmt.args[1], Core, :_typebody!) ||
-                    isdefined(Core, :_typebody!) && is_quotenode_egal(stmt.args[1], Core._typebody!))
+                if (is_global_ref(stmt.args[1], Core, :_typebody!) || is_quotenode_egal(stmt.args[1], Core._typebody!))
                     have_typebody = true
-                elseif (is_global_ref(stmt.args[1], Core, :_equiv_typedef) ||
-                    isdefined(Core, :_equiv_typedef) && is_quotenode_egal(stmt.args[1], Core._equiv_typedef))
+                elseif (is_global_ref(stmt.args[1], Core, :_equiv_typedef) || is_quotenode_egal(stmt.args[1], Core._equiv_typedef))
                     have_equivtypedef = true
                     # Advance to the type-assignment
                     while iend <= n

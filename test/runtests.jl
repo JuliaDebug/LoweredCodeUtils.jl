@@ -6,11 +6,6 @@ using Test
 # end
 
 @testset "LoweredCodeUtils.jl" begin
-    @static if VERSION ≥ v"1.8"
-        @testset "signatures.jl" include("signatures.jl")
-        @testset "codeedges.jl" include("codeedges.jl")
-    else
-        include("signatures.jl")
-        include("codeedges.jl")
-    end
+    @testset "signatures.jl" include("signatures.jl")
+    @testset "codeedges.jl" include("codeedges.jl")
 end

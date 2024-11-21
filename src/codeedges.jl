@@ -96,14 +96,10 @@ function print_names(io::IO, cl::CodeLinks)
     end
 end
 
-const preprinter_sentinel = isdefined(Base.IRShow, :statementidx_lineinfo_printer) ? 0 : typemin(Int32)
-
 function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
     src = copy(src)
     JuliaInterpreter.replace_coretypes!(src; rev=true)
-    if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
-        JuliaInterpreter.reverse_lookup_globalref!(src.code)
-    end
+    JuliaInterpreter.reverse_lookup_globalref!(src.code)
     io = IOContext(io,
         :displaysize=>displaysize(io),
         :SOURCE_SLOTNAMES => Base.sourceinfo_slotnames(src))
@@ -134,7 +130,7 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
         bb_idx_prev = bb_idx
     end
     max_bb_idx_size = ndigits(length(cfg.blocks))
-    line_info_preprinter(io, " "^(max_bb_idx_size + 2), preprinter_sentinel)
+    line_info_preprinter(io, " "^(max_bb_idx_size + 2), 0)
     postprint(io)
     return nothing
 end
@@ -531,12 +527,7 @@ function print_with_code(io::IO, src::CodeInfo, edges::CodeEdges)
         end
         printstyled(io, "\nCode:\n", color=:yellow)
     end
-    @static if isdefined(Base.IRShow, :show_ir_stmt)
-        preprint(::IO, ::Int) = nothing
-    else
-        nd = ndigits(length(src.code))
-        preprint(io::IO, i::Int) = print(io, lpad(i, nd), "  ")
-    end
+    preprint(::IO, ::Int) = nothing
     postprint(::IO) = nothing
     postprint(io::IO, idx::Int, bbchanged::Bool) = postprint_lineedges(io, idx, edges, bbchanged)
 
@@ -1072,9 +1063,7 @@ end
 
 function print_with_code(io::IO, frame::Frame, obj)
     src = frame.framecode.src
-    if isdefined(JuliaInterpreter, :reverse_lookup_globalref!)
-        src = copy(src)
-        JuliaInterpreter.reverse_lookup_globalref!(src.code)
-    end
+    src = copy(src)
+    JuliaInterpreter.reverse_lookup_globalref!(src.code)
     print_with_code(io, src, obj)
 end

@@ -344,17 +344,15 @@ module ModSelective end
     idx = findfirst(@nospecialize(stmt)->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
     @test lr[idx]
     # but make sure we don't break primitivetype & abstracttype (https://github.com/timholy/Revise.jl/pull/611)
-    if isdefined(Core, :_primitivetype)
-        thk = Meta.lower(Main, quote
-            primitive type WindowsRawSocket sizeof(Ptr) * 8 end
-        end)
-        src = thk.args[1]
-        edges = CodeEdges(Main, src)
-        idx = findfirst(istypedef, src.code)
-        r = LoweredCodeUtils.typedef_range(src, idx)
-        # 1 before :latestworld, 2 after
-        @test (length(src.code) - last(r)) in (1, 2)
-    end
+    thk = Meta.lower(Main, quote
+        primitive type WindowsRawSocket sizeof(Ptr) * 8 end
+    end)
+    src = thk.args[1]
+    edges = CodeEdges(Main, src)
+    idx = findfirst(istypedef, src.code)
+    r = LoweredCodeUtils.typedef_range(src, idx)
+    # 1 before :latestworld, 2 after
+    @test (length(src.code) - last(r)) in (1, 2)
 
     @testset "Display" begin
         # worth testing because this has proven quite crucial for debugging and
@@ -381,69 +379,22 @@ module ModSelective end
         str = String(take!(io))
         @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
         @test occursin(r"succs: ssas: ∅, slots: \[\d+\], names: ∅;", str)
-        # Some of these differ due to changes by Julia version in global var inference
-        if Base.VERSION < v"1.10"
-            @test occursin(r"s:\n  preds: ssas: \[\d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str) ||
-                  occursin(r"s:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d, \d+\]", str)   # with global var inference
-        end
-        if Base.VERSION < v"1.8"
-            @test occursin(r"\d+ preds: ssas: \[\d+\], slots: ∅, names: \[\:\(Main\.s\)\];\n\d+ succs: ssas: ∅, slots: ∅, names: \[\:\(Main\.s\)\];", str)
-        end
         LoweredCodeUtils.print_with_code(io, src, cl)
         str = String(take!(io))
-        if isdefined(Base.IRShow, :show_ir_stmt)
-            @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
-            @test occursin("# see name Main.s", str)
-            @test occursin("# see slot 1", str)
-            if Base.VERSION < v"1.8"  # changed by global var inference
-                @test occursin(r"# preds: ssas: \[\d+\], slots: ∅, names: \[\:\(Main\.s\)\]; succs: ssas: ∅, slots: ∅, names: \[\:\(Main\.s\)\];", str)
-            end
-        else
-            @test occursin("No IR statement printer", str)
-        end
+        @test occursin(r"slot 1:\n  preds: ssas: \[\d+, \d+\], slots: ∅, names: ∅;\n  succs: ssas: \[\d+, \d+, \d+\], slots: ∅, names: ∅;\n  assign @: \[\d+, \d+\]", str)
+        @test occursin("# see name Main.s", str)
+        @test occursin("# see slot 1", str)
         # CodeEdges
         edges = CodeEdges(Main, src)
         show(io, edges)
         str = String(take!(io))
-        if Base.VERSION < v"1.10"
-            @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str) ||
-                  occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+, \d+\], and used by \[\d+, \d+, \d+\]", str)   # global var inference
-        end
-        if Base.VERSION < v"1.9"
-            @test (count(occursin("statement $i depends on [1, $(i-1), $(i+1)] and is used by [1, $(i+1)]", str) for i = 1:length(src.code)) == 1) ||
-                  (count(occursin("statement $i depends on [4, $(i-1), $(i+4)] and is used by [$(i+2)]", str) for i = 1:length(src.code)) == 1)
-        end
         LoweredCodeUtils.print_with_code(io, src, edges)
         str = String(take!(io))
-        if isdefined(Base.IRShow, :show_ir_stmt)
-            if Base.VERSION < v"1.10"
-                @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str) ||
-                      occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+, \d+\], and used by \[\d+, \d+, \d+\]", str)
-            end
-            if Base.VERSION < v"1.9"
-                @test (count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1) ||
-                      (count(occursin("preds: [4, $(i-1), $(i+4)], succs: [$(i+2)]", str) for i = 1:length(src.code)) == 1)   # global var inference
-            end
-        else
-            @test occursin("No IR statement printer", str)
-        end
         # Works with Frames too
         frame = Frame(ModSelective, ex)
         edges = CodeEdges(ModSelective, frame.framecode.src)
         LoweredCodeUtils.print_with_code(io, frame, edges)
         str = String(take!(io))
-        if isdefined(Base.IRShow, :show_ir_stmt)
-            if Base.VERSION < v"1.10"
-                @test occursin(r"s: assigned on \[\d, \d+\], depends on \[\d+\], and used by \[\d+, \d+, \d+\]", str) ||
-                      occursin(r"s: assigned on \[\d, \d+\], depends on \[\d, \d+\], and used by \[\d+, \d+, \d+\]", str)   # global var inference
-            end
-            if Base.VERSION < v"1.9"
-                @test (count(occursin("preds: [1, $(i-1), $(i+1)], succs: [1, $(i+1)]", str) for i = 1:length(src.code)) == 1) ||
-                      (count(occursin("preds: [4, $(i-1), $(i+4)], succs: [$(i+2)]", str) for i = 1:length(src.code)) == 1)  # global var inference
-            end
-        else
-            @test occursin("No IR statement printer", str)
-        end
 
         # display slot names
         ex = :(let
