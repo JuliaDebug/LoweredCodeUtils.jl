@@ -1,9 +1,9 @@
-if isdefined(Base, :Experimental) && isdefined(Base.Experimental, Symbol("@optlevel"))
-    @eval Base.Experimental.@optlevel 1
-end
+Base.Experimental.@optlevel 1
 
 using Core: SimpleVector
 using Core.IR
+using Core.Compiler: construct_domtree, construct_postdomtree, nearest_common_dominator,
+    postdominates
 using Base.Meta: isexpr
 
 const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
@@ -17,14 +17,6 @@ export CodeEdges, lines_required, lines_required!, selective_eval!, selective_ev
 include("utils.jl")
 include("signatures.jl")
 include("codeedges.jl")
-if Base.VERSION < v"1.10"
-    include("domtree.jl")
-else
-    const construct_domtree = Core.Compiler.construct_domtree
-    const construct_postdomtree = Core.Compiler.construct_postdomtree
-    const postdominates = Core.Compiler.postdominates
-    const nearest_common_dominator = Core.Compiler.nearest_common_dominator
-end
 
 # precompilation
 
