@@ -58,9 +58,9 @@ function callee_matches(f, mod, sym)
     return false
 end
 
-function rhs(stmt)
-    is_assignment_like(stmt) && return (stmt::Expr).args[2]
-    return stmt
+function getrhs(@nospecialize(stmt))
+    lhs_rhs = get_lhs_rhs(stmt)
+    return lhs_rhs === nothing ? stmt : lhs_rhs[2]
 end
 
 ismethod(frame::Frame)  = ismethod(pc_expr(frame))
@@ -107,7 +107,7 @@ function ismethod_with_name(src, stmt, target::AbstractString; reentrant::Bool=f
 end
 
 # anonymous function types are defined in a :thunk expr with a characteristic CodeInfo
-function isanonymous_typedef(stmt)
+function isanonymous_typedef(@nospecialize stmt)
     if isa(stmt, Expr)
         stmt.head === :thunk || return false
         stmt = stmt.args[1]
@@ -119,21 +119,22 @@ function isanonymous_typedef(stmt)
         isexpr(stmt, :call) || return false
         is_global_ref(stmt.args[1], Core, :_typebody!) || return false
         stmt = isa(stmt.args[3], Core.SSAValue) ? src.code[end-3] : src.code[end-2]
-        is_assignment_like(stmt) || return false
-        name = stmt.args[1]
-        if isa(name, GlobalRef)
-            name = name.name
+        lhs_rhs = get_lhs_rhs(stmt)
+        lhs_rhs === nothing && return false
+        lhs, _ = lhs_rhs
+        if isa(lhs, GlobalRef)
+            lhs = lhs.name
         else
-            isa(name, Symbol) || return false
+            isa(lhs, Symbol) || return false
         end
-        return startswith(String(name), "#")
+        return startswith(String(lhs), "#")
     end
     return false
 end
 
 function istypedef(stmt)
     isa(stmt, Expr) || return false
-    stmt = rhs(stmt)
+    stmt = getrhs(stmt)
     isa(stmt, Expr) || return false
     @static if all(s->isdefined(Core,s), structdecls)
         if stmt.head === :call
@@ -162,6 +163,7 @@ function typedef_range(src::CodeInfo, idx)
     istart = idx
     while istart >= 1
         isexpr(src.code[istart], :global) && break
+        isexpr(src.code[istart], :latestworld) && break
         istart -= 1
     end
     istart >= 1 || error("no initial :global found")
@@ -171,6 +173,7 @@ function typedef_range(src::CodeInfo, idx)
         stmt = src.code[iend]
         if isa(stmt, Expr)
             stmt.head === :global && break
+            stmt.head === :latestworld && break
             if stmt.head === :call
                 if (is_global_ref(stmt.args[1], Core, :_typebody!) || is_quotenode_egal(stmt.args[1], Core._typebody!))
                     have_typebody = true
@@ -179,7 +182,7 @@ function typedef_range(src::CodeInfo, idx)
                     # Advance to the type-assignment
                     while iend <= n
                         stmt = src.code[iend]
-                        is_assignment_like(stmt) && break
+                        get_lhs_rhs(stmt) !== nothing && break
                         iend += 1
                     end
                 end

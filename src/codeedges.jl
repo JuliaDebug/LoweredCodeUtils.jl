@@ -163,8 +163,10 @@ function postprint_linelinks(io::IO, idx::Int, src::CodeInfo, cl::CodeLinks, bbc
     printstyled(io, bbchanged ? " " : "│", color=:light_black)
     printstyled(io, "             # ", color=:yellow)
     stmt = src.code[idx]
-    if is_assignment_like(stmt)
-        lhs = normalize_defsig(stmt.args[1], cl.thismod)
+    lhs_rhs = get_lhs_rhs(stmt)
+    if lhs_rhs !== nothing
+        lhs, _ = lhs_rhs
+        lhs = normalize_defsig(lhs, cl.thismod)
         if @issslotnum(lhs)
             # id = lhs.id
             # preds, succs = cl.slotpreds[id], cl.slotsuccs[id]
@@ -190,8 +192,27 @@ function namedkeys(cl::CodeLinks)
     return ukeys
 end
 
-is_assignment_like(stmt::Expr) = isexpr(stmt, :(=)) || (isexpr(stmt, :const) && length(stmt.args) == 2)
-is_assignment_like(@nospecialize stmt) = false
+function get_lhs_rhs(@nospecialize stmt)
+    if isexpr(stmt, :(=))
+        return Pair{Any,Any}(stmt.args[1], stmt.args[2])
+    elseif isexpr(stmt, :const) && length(stmt.args) == 2
+        return Pair{Any,Any}(stmt.args[1], stmt.args[2])
+    elseif isexpr(stmt, :call) && length(stmt.args) == 4
+        f = stmt.args[1]
+        if isa(f, GlobalRef) && f.name === :setglobal!
+            mod = stmt.args[2]
+            mod isa Module || return nothing
+            name = stmt.args[3]
+            if name isa QuoteNode
+                name = name.value
+            end
+            name isa Symbol || return nothing
+            lhs = GlobalRef(mod, name)
+            return Pair{Any,Any}(lhs, stmt.args[4])
+        end
+    end
+    return nothing
+end
 
 function direct_links!(cl::CodeLinks, src::CodeInfo)
     # Utility for when a stmt itself contains a CodeInfo
@@ -247,10 +268,10 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             end
             rhs = stmt
             target = P(SSAValue(i), cl.ssapreds[i])
-        elseif is_assignment_like(stmt)
+        elseif (lhs_rhs = get_lhs_rhs(stmt); lhs_rhs !== nothing)
             # An assignment
             stmt = stmt::Expr
-            lhs, rhs = stmt.args[1], stmt.args[2]
+            lhs, rhs = lhs_rhs
             if @issslotnum(lhs)
                 lhs = lhs::AnySlotNumber
                 id = lhs.id
@@ -423,9 +444,9 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     emptylist = Int[]
     for (i, stmt) in enumerate(src.code)
         # Identify line predecents for slots and named variables
-        if is_assignment_like(stmt)
+        if (lhs_rhs = get_lhs_rhs(stmt); lhs_rhs !== nothing)
             stmt = stmt::Expr
-            lhs = stmt.args[1]
+            lhs, _ = lhs_rhs
             # Mark predecessors and successors of this line by following ssas & named assignments
             if @issslotnum(lhs)
                 lhs = lhs::AnySlotNumber
@@ -611,7 +632,7 @@ function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
     i = 1
     nstmts = length(src.code)
     while i <= nstmts
-        stmt = rhs(src.code[i])
+        stmt = getrhs(src.code[i])
         if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
             r = typedef_range(src, i)
             pushall!(norequire, r)
@@ -871,7 +892,7 @@ function find_typedefs(src::CodeInfo)
     i = 1
     nstmts = length(src.code)
     while i <= nstmts
-        stmt = rhs(src.code[i])
+        stmt = getrhs(src.code[i])
         if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
             stmt = stmt::Expr
             r = typedef_range(src, i)
@@ -972,8 +993,8 @@ function add_inplace!(isrequired, src, edges, norequire)
                     for k in edges.preds[j]
                         isrequired[k] || continue
                         predstmt = src.code[k]
-                        if is_assignment_like(predstmt)
-                            lhs = predstmt.args[1]
+                        if (lhs_rhs = get_lhs_rhs(predstmt); lhs_rhs !== nothing)
+                            lhs, _ = lhs_rhs
                             if @issslotnum(lhs) && lhs.id == id
                                 changed |= mark_if_inplace(stmt, j)
                                 break

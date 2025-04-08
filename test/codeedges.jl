@@ -414,9 +414,8 @@ module ModSelective end
 end
 
 @testset "selective interpretation of toplevel definitions" begin
-    gen_mock_module() = Core.eval(@__MODULE__, :(module $(gensym(:LoweredCodeUtilsTestMock)) end))
     function check_toplevel_definition_interprete(ex, defs, undefs)
-        m = gen_mock_module()
+        m = Module(:LoweredCodeUtilsTestMock)
         lwr = Meta.lower(m, ex)
         src = first(lwr.args)
         stmts = src.code
@@ -426,8 +425,8 @@ end
         frame = Frame(m, src)
         selective_eval_fromstart!(frame, isrq, #=toplevel=#true)
 
-        for def in defs; @test isdefined(m, def); end
-        for undef in undefs; @test !isdefined(m, undef); end
+        for def in defs; @test @invokelatest(isdefined(m, def)); end
+        for undef in undefs; @test !@invokelatest(isdefined(m, undef)); end
     end
 
     @testset "case: $(i), interpret: $(defs), ignore $(undefs)" for (i, ex, defs, undefs) in (
