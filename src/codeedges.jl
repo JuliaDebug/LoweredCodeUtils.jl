@@ -325,7 +325,7 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
             cl.namesuccs[stmt] = namestore = Links()
         end
         push!(namestore, targetid)
-    elseif isa(stmt, Expr) && stmt.head !== :copyast
+    elseif isa(stmt, Expr) && stmt.head !== :copyast && stmt.head !== :globaldecl
         stmt = stmt::Expr
         arng = 1:length(stmt.args)
         if stmt.head === :call
@@ -337,6 +337,20 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
         end
         for i in arng
             add_links!(target, stmt.args[i], cl)
+        end
+    elseif isexpr(stmt, :globaldecl)
+        for i = 1:length(stmt.args)
+            a = stmt.args[i]
+            if a isa GlobalRef
+                namestore = get(cl.namepreds, a, nothing)
+                if namestore === nothing
+                    cl.namepreds[a] = namestore = Links()
+                end
+                push!(namestore, targetid)
+                if targetid isa SSAValue
+                    push!(namestore, SSAValue(targetid.id+1)) # +1 for :latestworld
+                end
+            end
         end
     elseif stmt isa Core.GotoIfNot
         add_links!(target, stmt.cond, cl)
@@ -383,7 +397,6 @@ struct Variable
     preds::Vector{Int}
     succs::Vector{Int}
 end
-Variable() = Variable(Int[], Int[], Int[])
 
 function Base.show(io::IO, v::Variable)
     print(io, "assigned on ", showempty(v.assigned))
@@ -736,10 +749,17 @@ function add_succs!(isrequired, idx, edges::CodeEdges, succs, norequire)
     end
     return chngd
 end
-function add_obj!(isrequired, objs, obj, edges::CodeEdges, norequire)
+function add_obj!(isrequired, objs, obj::GlobalRef, edges::CodeEdges, norequire)
     chngd = false
+    for p in edges.byname[obj].preds
+        p ∈ norequire && continue
+        isrequired[p] && continue
+        isrequired[p] = true
+        chngd = true
+    end
     for d in edges.byname[obj].assigned
         d ∈ norequire && continue
+        isrequired[d] && continue
         isrequired[d] || add_preds!(isrequired, d, edges, norequire)
         isrequired[d] = true
         chngd = true
