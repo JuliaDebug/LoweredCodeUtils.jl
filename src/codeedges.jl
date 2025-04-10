@@ -218,17 +218,11 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
     # Utility for when a stmt itself contains a CodeInfo
     function add_inner!(cl::CodeLinks, icl::CodeLinks, idx)
         for (name, _) in icl.nameassigns
-            assigns = get(cl.nameassigns, name, nothing)
-            if assigns === nothing
-                cl.nameassigns[name] = assigns = Int[]
-            end
+            assigns = get!(Vector{Int}, cl.nameassigns, name)
             push!(assigns, idx)
         end
         for (name, _) in icl.namesuccs
-            succs = get(cl.namesuccs, name, nothing)
-            if succs === nothing
-                cl.namesuccs[name] = succs = Links()
-            end
+            succs = get!(Links, cl.namesuccs, name)
             push!(succs.ssas, idx)
         end
     end
@@ -255,10 +249,7 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                     cl.nameassigns[name] = assign = Int[]
                 end
                 push!(assign, i)
-                targetstore = get(cl.namepreds, name, nothing)
-                if targetstore === nothing
-                    cl.namepreds[name] = targetstore = Links()
-                end
+                targetstore = get!(Links, cl.namepreds, name)
                 target = P(name, targetstore)
                 add_links!(target, stmt, cl)
             elseif name in (nothing, false)
@@ -281,10 +272,7 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                 if isa(lhs, Symbol)
                     lhs = GlobalRef(cl.thismod, lhs)
                 end
-                targetstore = get(cl.namepreds, lhs, nothing)
-                if targetstore === nothing
-                    cl.namepreds[lhs] = targetstore = Links()
-                end
+                targetstore = get!(Links, cl.namepreds, lhs)
                 target = P(lhs, targetstore)
                 assign = get(cl.nameassigns, lhs, nothing)
                 if assign === nothing
@@ -320,20 +308,14 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
             stmt = GlobalRef(cl.thismod, stmt)
         end
         push!(targetstore, stmt)
-        namestore = get(cl.namesuccs, stmt, nothing)
-        if namestore === nothing
-            cl.namesuccs[stmt] = namestore = Links()
-        end
+        namestore = get!(Links, cl.namesuccs, stmt)
         push!(namestore, targetid)
     elseif isa(stmt, Expr)
         if stmt.head === :globaldecl
             for i = 1:length(stmt.args)
                 a = stmt.args[i]
                 if a isa GlobalRef
-                    namestore = get(cl.namepreds, a, nothing)
-                    if namestore === nothing
-                        cl.namepreds[a] = namestore = Links()
-                    end
+                    namestore = get!(Links, cl.namepreds, a)
                     push!(namestore, targetid)
                     if targetid isa SSAValue
                         push!(namestore, SSAValue(targetid.id+1)) # +1 for :latestworld
@@ -1101,7 +1083,7 @@ function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool}
     preprint(::IO) = nothing
     preprint(io::IO, idx::Int) = (c = isrequired[idx]; printstyled(io, lpad(idx, nd), ' ', c ? "t " : "f "; color = c ? :cyan : :plain))
     postprint(::IO) = nothing
-    postprint(io::IO, idx::Int, bbchanged::Bool) = nothing
+    postprint(::IO, idx::Int, bbchanged::Bool) = nothing
 
     print_with_code(preprint, postprint, io, src)
 end
