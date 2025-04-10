@@ -325,31 +325,35 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
             cl.namesuccs[stmt] = namestore = Links()
         end
         push!(namestore, targetid)
-    elseif isa(stmt, Expr) && stmt.head !== :copyast && stmt.head !== :globaldecl
-        stmt = stmt::Expr
-        arng = 1:length(stmt.args)
-        if stmt.head === :call
-            f = stmt.args[1]
-            if !@isssa(f) && !@issslotnum(f)
-                # Avoid putting named callees on the namestore
-                arng = 2:length(stmt.args)
+    elseif isa(stmt, Expr)
+        if stmt.head === :globaldecl
+            for i = 1:length(stmt.args)
+                a = stmt.args[i]
+                if a isa GlobalRef
+                    namestore = get(cl.namepreds, a, nothing)
+                    if namestore === nothing
+                        cl.namepreds[a] = namestore = Links()
+                    end
+                    push!(namestore, targetid)
+                    if targetid isa SSAValue
+                        push!(namestore, SSAValue(targetid.id+1)) # +1 for :latestworld
+                    end
+                else
+                    add_links!(target, a, cl)
+                end
             end
-        end
-        for i in arng
-            add_links!(target, stmt.args[i], cl)
-        end
-    elseif isexpr(stmt, :globaldecl)
-        for i = 1:length(stmt.args)
-            a = stmt.args[i]
-            if a isa GlobalRef
-                namestore = get(cl.namepreds, a, nothing)
-                if namestore === nothing
-                    cl.namepreds[a] = namestore = Links()
+        elseif stmt.head !== :copyast
+            stmt = stmt::Expr
+            arng = 1:length(stmt.args)
+            if stmt.head === :call
+                f = stmt.args[1]
+                if !@isssa(f) && !@issslotnum(f)
+                    # Avoid putting named callees on the namestore
+                    arng = 2:length(stmt.args)
                 end
-                push!(namestore, targetid)
-                if targetid isa SSAValue
-                    push!(namestore, SSAValue(targetid.id+1)) # +1 for :latestworld
-                end
+            end
+            for i in arng
+                add_links!(target, stmt.args[i], cl)
             end
         end
     elseif stmt isa Core.GotoIfNot
