@@ -236,13 +236,13 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
     P = Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}
 
     for (i, stmt) in enumerate(src.code)
-        if isexpr(stmt, :thunk) && isa(stmt.args[1], CodeInfo)
-            icl = CodeLinks(cl.thismod, stmt.args[1])
+        if isexpr(stmt, :thunk) && (arg1 = stmt.args[1]; arg1 isa CodeInfo)
+            icl = CodeLinks(cl.thismod, arg1)
             add_inner!(cl, icl, i)
             continue
-        elseif isa(stmt, Expr) && stmt.head ∈ trackedheads
-            if stmt.head === :method && length(stmt.args) === 3 && isa(stmt.args[3], CodeInfo)
-                icl = CodeLinks(cl.thismod, stmt.args[3])
+        elseif isexpr(stmt, :method)
+            if length(stmt.args) === 3 && (arg3 = stmt.args[3]; arg3 isa CodeInfo)
+                icl = CodeLinks(cl.thismod, arg3)
                 add_inner!(cl, icl, i)
             end
             name = stmt.args[1]

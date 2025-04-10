@@ -6,7 +6,7 @@ using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
-function hastrackedexpr(@nospecialize(stmt); heads=LoweredCodeUtils.trackedheads)
+function hastrackedexpr(@nospecialize(stmt))
     haseval = false
     if isa(stmt, Expr)
         if stmt.head === :call
@@ -16,8 +16,8 @@ function hastrackedexpr(@nospecialize(stmt); heads=LoweredCodeUtils.trackedheads
             callee_matches(f, Core, :_setsuper!) && return true, haseval
             f === :include && return true, haseval
         elseif stmt.head === :thunk
-            any(s->any(hastrackedexpr(s; heads=heads)), stmt.args[1].code) && return true, haseval
-        elseif stmt.head ∈ heads
+            any(s->any(hastrackedexpr(s)), stmt.args[1].code) && return true, haseval
+        elseif stmt.head === :method
             return true, haseval
         end
     end
