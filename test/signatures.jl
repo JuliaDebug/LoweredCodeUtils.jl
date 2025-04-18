@@ -505,4 +505,26 @@ end
 
 end
 
+@testset "Support for external method tables" begin
+    ExternalMT = Module()
+    Core.eval(ExternalMT, :(Base.Experimental.@MethodTable method_table))
+    signatures = []
+
+    ex = :(Base.sin(::Float64) = "sin")
+    Core.eval(ExternalMT, ex)
+    frame = Frame(ExternalMT, ex)
+    pc = methoddefs!(signatures, frame; define = false)
+    @test length(signatures) == 1
+    (mt, sig) = pop!(signatures)
+    @test (mt, sig) === (nothing, Tuple{typeof(sin), Float64})
+
+    ex = :(Base.Experimental.@overlay method_table sin(::Float64) = "sin")
+    Core.eval(ExternalMT, ex)
+    frame = Frame(ExternalMT, ex)
+    pc = methoddefs!(signatures, frame; define = false)
+    @test length(signatures) == 1
+    (mt, sig) = pop!(signatures)
+    @test (mt, sig) === (ExternalMT.method_table, Tuple{typeof(sin), Float64})
+end
+
 end # module signatures
