@@ -53,9 +53,10 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
         stmt = pc_expr(frame, pc)
     end
     isa(stmt, Expr) || return nothing, pc
+    mt = extract_method_table(frame, stmt; eval = false)
     sigsv = @lookup(frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
-    return sigt, lastpc
+    return mt => sigt, lastpc
 end
 signature(@nospecialize(recurse), frame::Frame, pc) = signature(recurse, frame, pc_expr(frame, pc), pc)
 signature(frame::Frame, pc) = signature(finish_and_return!, frame, pc)
@@ -439,9 +440,9 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
         pctop -= 1
         stmt = pc_expr(frame, pctop)
     end   # end fix
-    sigtparent, lastpcparent = signature(recurse, frame, pctop)
+    (mt, sigtparent), lastpcparent = signature(recurse, frame, pctop)
     sigtparent === nothing && return name, pc, lastpcparent
-    methparent = whichtt(sigtparent)
+    methparent = whichtt(sigtparent, mt)
     methparent === nothing && return name, pc, lastpcparent  # caller isn't defined, no correction is needed
     if isgen
         cname = GlobalRef(moduleof(frame), nameof(methparent.generator.gen))
@@ -507,6 +508,8 @@ function skip_until!(predicate, @nospecialize(recurse), frame)
     return pc
 end
 
+method_table(method::Method) = isdefined(method, :external_mt) ? method.external_mt::MethodTable : nothing
+
 """
     ret = methoddef!(recurse, signatures, frame; define=true)
     ret = methoddef!(signatures, frame; define=true)
@@ -536,22 +539,22 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     if ismethod3(stmt)
         pc3 = pc
         arg1 = stmt.args[1]
-        sigt, pc = signature(recurse, frame, stmt, pc)
-        meth = whichtt(sigt)
+        (mt, sigt), pc = signature(recurse, frame, stmt, pc)
+        meth = whichtt(sigt, mt)
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
             pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(recurse, frame)
         elseif define
             pc = step_expr!(recurse, frame, stmt, true)
-            meth = whichtt(sigt)
+            meth = whichtt(sigt, mt)
         end
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
-            push!(signatures, meth.sig)
+            push!(signatures, mt => meth.sig)
         else
             if arg1 === false || arg1 === nothing
                 # If it's anonymous and not defined, define it
                 pc = step_expr!(recurse, frame, stmt, true)
-                meth = whichtt(sigt)
-                isa(meth, Method) && push!(signatures, meth.sig)
+                meth = whichtt(sigt, mt)
+                isa(meth, Method) && push!(signatures, mt => meth.sig)
                 return pc, pc3
             else
                 # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
@@ -592,7 +595,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     end
     found || return nothing
     while true  # methods containing inner methods may need multiple trips through this loop
-        sigt, pc = signature(recurse, frame, stmt, pc)
+        (mt, sigt), pc = signature(recurse, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
             pc = next_or_nothing(recurse, frame, pc)  # this should not check define, we've probably already done this once
@@ -607,8 +610,8 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         # signature of the active method. So let's get the active signature.
         frame.pc = pc
         pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(recurse, frame)
-        meth = whichtt(sigt)
-        isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
+        meth = whichtt(sigt, mt)
+        isa(meth, Method) && push!(signatures, mt => meth.sig) # inner methods are not visible
         name === name3 && return pc, pc3     # if this was an inner method we should keep going
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end

@@ -13,7 +13,7 @@ using JuliaInterpreter
 using JuliaInterpreter: SSAValue, SlotNumber, Frame
 using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, is_quotenode_egal, whichtt,
                         next_until!, finish_and_return!, get_return, nstatements, codelocation, linetable,
-                        is_return, lookup_return
+                        is_return, lookup_return, extract_method_table
 
 include("packagedef.jl")
 
