@@ -8,7 +8,6 @@ using Base.Meta: isexpr
 
 const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
 
-const trackedheads = (:method,)
 const structdecls = (:_structtype, :_abstracttype, :_primitivetype)
 
 export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod

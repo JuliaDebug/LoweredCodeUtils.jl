@@ -6,7 +6,7 @@ using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
-function hastrackedexpr(@nospecialize(stmt); heads=LoweredCodeUtils.trackedheads)
+function hastrackedexpr(@nospecialize(stmt))
     haseval = false
     if isa(stmt, Expr)
         if stmt.head === :call
@@ -16,8 +16,8 @@ function hastrackedexpr(@nospecialize(stmt); heads=LoweredCodeUtils.trackedheads
             callee_matches(f, Core, :_setsuper!) && return true, haseval
             f === :include && return true, haseval
         elseif stmt.head === :thunk
-            any(s->any(hastrackedexpr(s; heads=heads)), stmt.args[1].code) && return true, haseval
-        elseif stmt.head ∈ heads
+            any(s->any(hastrackedexpr(s)), stmt.args[1].code) && return true, haseval
+        elseif stmt.head === :method
             return true, haseval
         end
     end
@@ -66,24 +66,24 @@ module ModSelective end
     Core.eval(ModEval, ex)
     isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
     # theere is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.x === ModEval.x
     @test allmissing(ModSelective, (:y, :z, :a, :b, :k))
     @test !allmissing(ModSelective, (:x, :y))    # add :y here to test the `all` part of the test itself
     # To evaluate z we need to do all the computations for y
     isrequired = lines_required(GlobalRef(ModSelective, :z), src, edges)
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.y === ModEval.y
     @test ModSelective.z === ModEval.z
     @test allmissing(ModSelective, (:a, :b, :k))    # ... but not a and b
     isrequired = lines_required(length(src.code)-1, src, edges)  # this should be the assignment of b
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.a === ModEval.a
     @test ModSelective.b === ModEval.b
     # Test that we get two separate evaluations of k
     @test allmissing(ModSelective, (:k,))
     isrequired = lines_required(GlobalRef(ModSelective, :k), src, edges)
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.k != ModEval.k
 
     # Control-flow
@@ -124,7 +124,7 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
     isrequired = lines_required(GlobalRef(ModSelective, :a3), src, edges)
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     Core.eval(ModEval, ex)
     @test ModSelective.a3 === ModEval.a3 == 2
     @test allmissing(ModSelective, (:z3, :x3, :y3))
@@ -143,7 +143,7 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
     isrequired = lines_required(GlobalRef(ModSelective, :valcf), src, edges)
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.valcf == 4
 
     ex = quote
@@ -161,7 +161,7 @@ module ModSelective end
     edges = CodeEdges(ModSelective, src)
     isrequired = lines_required(GlobalRef(ModSelective, :c_os), src, edges)
     @test sum(isrequired) >= length(isrequired) - 3
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     Core.eval(ModEval, ex)
     @test ModSelective.c_os === ModEval.c_os == Sys.iswindows()
 
@@ -187,7 +187,7 @@ module ModSelective end
     @test sum(isrequired) == 1
     isrequired[edges.succs[findfirst(isrequired)]] .= true   # add lines that use Core.eval
     lines_required!(isrequired, src, edges)
-    selective_eval_fromstart!(frame, isrequired)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.feval1(1.0f0) == 1
     @test ModSelective.feval1(1.0)   == 1
     @test_throws MethodError ModSelective.feval1(1)
@@ -206,13 +206,13 @@ module ModSelective end
         end
     end
     frame = Frame(ModSelective, ex)
-    JuliaInterpreter.finish_and_return!(frame, true)
+    JuliaInterpreter.finish_and_return!(frame, #=istoplevel=#true)
     @test ModSelective.k11 == 11
     @test 3 <= ModSelective.s11 <= 15
     Core.eval(ModSelective, :(k11 = 0; s11 = -1))
     edges = CodeEdges(ModSelective, frame.framecode.src)
     isrequired = lines_required(GlobalRef(ModSelective, :s11), frame.framecode.src, edges)
-    selective_eval_fromstart!(frame, isrequired, true)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
 
@@ -224,7 +224,7 @@ module ModSelective end
     # Check that the StructParent name is discovered everywhere it is used
     var = edges.byname[GlobalRef(ModSelective, :StructParent)]
     isrequired = minimal_evaluation(hastrackedexpr, src, edges)
-    selective_eval_fromstart!(frame, isrequired, true)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test supertype(ModSelective.StructParent) === AbstractArray
     # Also check redefinition (it's OK when the definition doesn't change)
     Core.eval(ModEval, ex)
@@ -232,7 +232,7 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(ModEval, src)
     isrequired = minimal_evaluation(hastrackedexpr, src, edges)
-    selective_eval_fromstart!(frame, isrequired, true)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test supertype(ModEval.StructParent) === AbstractArray
 
     # Finding all dependencies in a struct definition
@@ -241,9 +241,19 @@ module ModSelective end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
-    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod_with_name(src, stmt, "NoParam"),false), src, edges)  # initially mark only the constructor
-    selective_eval_fromstart!(frame, isrequired, true)
-    @test isa(ModSelective.NoParam(), ModSelective.NoParam)
+    isrequired = minimal_evaluation(src, edges) do @nospecialize stmt
+        # initially mark only the constructor
+        @static if VERSION ≥ v"1.12-"
+            return (Meta.isexpr(stmt, :call) && stmt.args[1] == GlobalRef(Core, :_defaultctors), false)
+        else
+            return (LoweredCodeUtils.ismethod_with_name(src, stmt, "NoParam"), false)
+        end
+    end
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
+    let NoParam = @invokelatest ModSelective.NoParam
+        @test isa(NoParam(), NoParam)
+    end
+
     # Parametric
     ex = quote
         struct Struct{T} <: StructParent{T,1}
@@ -253,9 +263,19 @@ module ModSelective end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
-    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod_with_name(src, stmt, "Struct"),false), src, edges)  # initially mark only the constructor
-    selective_eval_fromstart!(frame, isrequired, true)
-    @test isa(ModSelective.Struct([1,2,3]), ModSelective.Struct{Int})
+    isrequired = minimal_evaluation(src, edges) do @nospecialize stmt
+        # initially mark only the constructor
+        @static if VERSION ≥ v"1.12-"
+            return (Meta.isexpr(stmt, :call) && stmt.args[1] == GlobalRef(Core, :_defaultctors), false)
+        else
+            return (LoweredCodeUtils.ismethod_with_name(src, stmt, "Struct"), false)
+        end
+    end
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
+    let Struct = @invokelatest ModSelective.Struct
+        @test isa(Struct([1,2,3]), Struct{Int})
+    end
+
     # Keyword constructor (this generates :copyast expressions)
     ex = quote
         struct KWStruct
@@ -271,7 +291,7 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
     isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges)  # initially mark only the constructor
-    selective_eval_fromstart!(frame, isrequired, true)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     kws = ModSelective.KWStruct(y=5.0f0)
     @test kws.y === 5.0f0
 
@@ -281,14 +301,15 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
     isrequired = fill(false, length(src.code))
-    j = length(src.code) - 1
-    while !Meta.isexpr(src.code[j], :method, 3)
-        j -= 1
+    let j = length(src.code) - 1
+        while !Meta.isexpr(src.code[j], :method, 3)
+            j -= 1
+        end
+        @assert Meta.isexpr(src.code[j], :method, 3)
+        isrequired[j] = true
     end
-    @assert Meta.isexpr(src.code[j], :method, 3)
-    isrequired[j] = true
     lines_required!(isrequired, src, edges)
-    selective_eval_fromstart!(frame, isrequired, true)
+    selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.max_values(Int16) === 65536
 
     # Avoid redefining types
@@ -414,9 +435,8 @@ module ModSelective end
 end
 
 @testset "selective interpretation of toplevel definitions" begin
-    gen_mock_module() = Core.eval(@__MODULE__, :(module $(gensym(:LoweredCodeUtilsTestMock)) end))
     function check_toplevel_definition_interprete(ex, defs, undefs)
-        m = gen_mock_module()
+        m = Module(:LoweredCodeUtilsTestMock)
         lwr = Meta.lower(m, ex)
         src = first(lwr.args)
         stmts = src.code
@@ -426,8 +446,8 @@ end
         frame = Frame(m, src)
         selective_eval_fromstart!(frame, isrq, #=toplevel=#true)
 
-        for def in defs; @test isdefined(m, def); end
-        for undef in undefs; @test !isdefined(m, undef); end
+        for def in defs; @test @invokelatest(isdefined(m, def)); end
+        for undef in undefs; @test !@invokelatest(isdefined(m, undef)); end
     end
 
     @testset "case: $(i), interpret: $(defs), ignore $(undefs)" for (i, ex, defs, undefs) in (
