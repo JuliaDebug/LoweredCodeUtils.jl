@@ -192,6 +192,13 @@ function namedkeys(cl::CodeLinks)
     return ukeys
 end
 
+# Required by Revise, but otherwise deprecated
+# The depwarn is currently disabled because Revise's tests check for empty warning logs
+function is_assignment_like(@nospecialize stmt)
+    # Base.depwarn("is_assignment_like is deprecated, switch to `LoweredCodeUtils.get_lhs_rhs`", :is_assignment_like)
+    return isexpr(stmt, :(=)) || isexpr(stmt, :const, 2)
+end
+
 function get_lhs_rhs(@nospecialize stmt)
     if isexpr(stmt, :(=))
         return Pair{Any,Any}(stmt.args[1], stmt.args[2])
@@ -199,7 +206,7 @@ function get_lhs_rhs(@nospecialize stmt)
         return Pair{Any,Any}(stmt.args[1], stmt.args[2])
     elseif isexpr(stmt, :call) && length(stmt.args) == 4
         f = stmt.args[1]
-        if isa(f, GlobalRef) && f.name === :setglobal!
+        if is_global_ref_egal(f, :setglobal!, Core.setglobal!)
             mod = stmt.args[2]
             mod isa Module || return nothing
             name = stmt.args[3]
