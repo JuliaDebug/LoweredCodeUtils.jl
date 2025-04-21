@@ -534,7 +534,7 @@ occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
 """
-function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
+function methoddef!(@nospecialize(recurse), signatures::Vector{Pair{Union{Nothing,MethodTable},Any}}, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
     framecode, pcin = frame.framecode, pc
     if ismethod3(stmt)
         pc3 = pc
