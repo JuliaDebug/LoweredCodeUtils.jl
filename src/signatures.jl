@@ -508,8 +508,6 @@ function skip_until!(predicate, @nospecialize(recurse), frame)
     return pc
 end
 
-method_table(method::Method) = isdefined(method, :external_mt) ? method.external_mt::MethodTable : nothing
-
 """
     ret = methoddef!(recurse, signatures, frame; define=true)
     ret = methoddef!(signatures, frame; define=true)
