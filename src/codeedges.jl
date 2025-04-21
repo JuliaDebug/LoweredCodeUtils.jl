@@ -1022,7 +1022,7 @@ function add_inplace!(isrequired, src, edges, norequire)
 end
 
 """
-    selective_eval!([recurse], frame::Frame, isrequired::AbstractVector{Bool}, istoplevel=false)
+    selective_eval!([interp::Interpreter=RecursiveInterpreter()], frame::Frame, isrequired::AbstractVector{Bool}, istoplevel=false)
 
 Execute the code in `frame` in the manner of `JuliaInterpreter.finish_and_return!`,
 but skipping all statements that are marked `false` in `isrequired`.
@@ -1030,23 +1030,21 @@ See [`lines_required`](@ref). Upon entry, if needed the caller must ensure that 
 set to the correct statement, typically `findfirst(isrequired)`.
 See [`selective_eval_fromstart!`](@ref) to have that performed automatically.
 
-The default value for `recurse` is `JuliaInterpreter.finish_and_return!`.
 `isrequired` pertains only to `frame` itself, not any of its callees.
 
 This will return either a `BreakpointRef`, the value obtained from the last executed statement
 (if stored to `frame.framedata.ssavlues`), or `nothing`.
 Typically, assignment to a variable binding does not result in an ssa store by JuliaInterpreter.
 """
-function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
+function selective_eval!(interp::Interpreter, frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
     pc = pcexec = pclast = frame.pc
     while isa(pc, Int)
         frame.pc = pc
-        te = isrequired[pc]
         pclast = pcexec::Int
-        if te
-            pcexec = pc = step_expr!(recurse, frame, istoplevel)
+        if isrequired[pc]
+            pcexec = pc = step_expr!(interp, frame, istoplevel)
         else
-            pc = next_or_nothing!(recurse, frame)
+            pc = next_or_nothing!(interp, frame)
         end
     end
     isa(pc, BreakpointRef) && return pc
@@ -1058,22 +1056,22 @@ function selective_eval!(@nospecialize(recurse), frame::Frame, isrequired::Abstr
     return nothing
 end
 function selective_eval!(frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
-    selective_eval!(finish_and_return!, frame, isrequired, istoplevel)
+    selective_eval!(RecursiveInterpreter(), frame, isrequired, istoplevel)
 end
 
 """
-    selective_eval_fromstart!([recurse], frame, isrequired, istoplevel=false)
+    selective_eval_fromstart!([interp::Interpreter=RecursiveInterpreter()], frame, isrequired, istoplevel=false)
 
 Like [`selective_eval!`](@ref), except it sets `frame.pc` to the first `true` statement in `isrequired`.
 """
-function selective_eval_fromstart!(@nospecialize(recurse), frame, isrequired, istoplevel::Bool=false)
+function selective_eval_fromstart!(interp::Interpreter, frame, isrequired, istoplevel::Bool=false)
     pc = findfirst(isrequired)
     pc === nothing && return nothing
     frame.pc = pc
-    return selective_eval!(recurse, frame, isrequired, istoplevel)
+    return selective_eval!(interp, frame, isrequired, istoplevel)
 end
 function selective_eval_fromstart!(frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
-    selective_eval_fromstart!(finish_and_return!, frame, isrequired, istoplevel)
+    selective_eval_fromstart!(RecursiveInterpreter(), frame, isrequired, istoplevel)
 end
 
 """
