@@ -514,8 +514,8 @@ method_table(method::Method) = isdefined(method, :external_mt) ? method.external
     ret = methoddef!(recurse, signatures, frame; define=true)
     ret = methoddef!(signatures, frame; define=true)
 
-Compute the signature of a method definition. `frame.pc` should point to a
-`:method` expression. Upon exit, the new signature will be added to `signatures`.
+Compute the method table/signature pair of a method definition. `frame.pc` should point to a
+`:method` expression. Upon exit, the new method table/signature pair will be added to `signatures`.
 
 There are several possible return values:
 
