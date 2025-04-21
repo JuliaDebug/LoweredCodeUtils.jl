@@ -480,8 +480,7 @@ macro deffoogr_sandbox()
         $gr(args...) = length(args)
     end
 end
-let
-    ex = quote
+let ex = quote
         @deffoogr_sandbox
         @show sandboxgr.foogr_sandbox(1,2,3)
     end

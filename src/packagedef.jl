@@ -1,14 +1,17 @@
 Base.Experimental.@optlevel 1
 
-using Core: SimpleVector
-using Core.IR
+using Core: SimpleVector, MethodTable
+using Core.IR: CodeInfo, GotoIfNot, GotoNode, IR, MethodInstance, ReturnNode
+@static if isdefined(Core.IR, :EnterNode)
+    using Core.IR: EnterNode
+end
 using Core.Compiler: construct_domtree, construct_postdomtree, nearest_common_dominator,
     postdominates
 using Base.Meta: isexpr
 
 const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
 
-const trackedheads = (:method,)
+const trackedheads = (:method,)    # Revise uses this (for now), don't delete; also update test/hastrackedexpr if this list gets expanded
 const structdecls = (:_structtype, :_abstracttype, :_primitivetype)
 
 export signature, rename_framemethods!, methoddef!, methoddefs!, bodymethod
