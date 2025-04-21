@@ -2,6 +2,7 @@ module Signatures
 
 using LoweredCodeUtils
 using InteractiveUtils
+using CodeTracking: MethodInfoKey
 using JuliaInterpreter
 using JuliaInterpreter: finish_and_return!
 using Core: CodeInfo
@@ -34,7 +35,7 @@ bodymethtest4(x, y=1) = 4
 bodymethtest5(x, y=Dict(1=>2)) = 5
 
 @testset "Signatures" begin
-    signatures = Set{Any}()
+    signatures = MethodInfoKey[]
     newcode = CodeInfo[]
     for ex in (:(f(x::Int8; y=0) = y),
                :(f(x::Int16; y::Int=0) = 2),
@@ -139,7 +140,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     @test g(3) == 6
 
     # Don't be deceived by inner methods
-    signatures = []
+    signatures = MethodInfoKey[]
     ex = quote
         function fouter(x)
             finner(::Float16) = 2x
@@ -168,7 +169,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
     frame = Frame(Base, ex)
     rename_framemethods!(frame)
-    signatures = Set{Any}()
+    signatures = MethodInfoKey[]
     methoddef!(signatures, frame; define=false)
     @test length(signatures) == 1
     mt, sig = first(signatures)
@@ -507,7 +508,7 @@ end
 @testset "Support for external method tables" begin
     ExternalMT = Module()
     Core.eval(ExternalMT, :(Base.Experimental.@MethodTable method_table))
-    signatures = []
+    signatures = MethodInfoKey[]
 
     ex = :(Base.sin(::Float64) = "sin")
     Core.eval(ExternalMT, ex)

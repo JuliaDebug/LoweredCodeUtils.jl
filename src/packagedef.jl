@@ -1,6 +1,6 @@
 Base.Experimental.@optlevel 1
 
-using Core: SimpleVector, MethodTable
+using Core: SimpleVector
 using Core.IR: CodeInfo, GotoIfNot, GotoNode, IR, MethodInstance, ReturnNode
 @static if isdefined(Core.IR, :EnterNode)
     using Core.IR: EnterNode

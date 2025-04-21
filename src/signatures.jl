@@ -56,7 +56,7 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
     mt = extract_method_table(frame, stmt; eval = false)
     sigsv = @lookup(frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
-    return Pair{Union{Nothing,MethodTable},Any}(mt, sigt), lastpc
+    return MethodInfoKey(mt, sigt), lastpc
 end
 signature(@nospecialize(recurse), frame::Frame, pc) = signature(recurse, frame, pc_expr(frame, pc), pc)
 signature(frame::Frame, pc) = signature(finish_and_return!, frame, pc)
@@ -534,7 +534,7 @@ occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
 """
-function methoddef!(@nospecialize(recurse), signatures::Vector{Pair{Union{Nothing,MethodTable},Any}}, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
+function methoddef!(@nospecialize(recurse), signatures::Vector{MethodInfoKey}, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
     framecode, pcin = frame.framecode, pc
     if ismethod3(stmt)
         pc3 = pc

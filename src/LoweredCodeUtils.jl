@@ -9,6 +9,8 @@ module LoweredCodeUtils
 # This somewhat unusual structure is in place to support
 # the VS Code extension integration.
 
+using CodeTracking: MethodInfoKey
+
 using JuliaInterpreter
 using JuliaInterpreter: SSAValue, SlotNumber, Frame
 using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, is_global_ref_egal, is_quotenode_egal, whichtt,
