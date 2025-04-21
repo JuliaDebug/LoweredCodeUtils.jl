@@ -510,21 +510,21 @@ end
     Core.eval(ExternalMT, :(Base.Experimental.@MethodTable method_table))
     signatures = MethodInfoKey[]
 
-    ex = :(Base.sin(::Float64) = "sin")
+    ex = :(foo(x) = "foo")
     Core.eval(ExternalMT, ex)
     frame = Frame(ExternalMT, ex)
     pc = methoddefs!(signatures, frame; define = false)
     @test length(signatures) == 1
     (mt, sig) = pop!(signatures)
-    @test (mt, sig) === (nothing, Tuple{typeof(sin), Float64})
+    @test (mt, sig) === (nothing, Tuple{typeof(ExternalMT.foo), Any})
 
-    ex = :(Base.Experimental.@overlay method_table sin(::Float64) = "sin")
+    ex = :(Base.Experimental.@overlay method_table foo(x) = "overlayed foo")
     Core.eval(ExternalMT, ex)
     frame = Frame(ExternalMT, ex)
     pc = methoddefs!(signatures, frame; define = false)
     @test length(signatures) == 1
     (mt, sig) = pop!(signatures)
-    @test (mt, sig) === (ExternalMT.method_table, Tuple{typeof(sin), Float64})
+    @test (mt, sig) === (ExternalMT.method_table, Tuple{typeof(ExternalMT.foo), Any})
 end
 
 end # module signatures
