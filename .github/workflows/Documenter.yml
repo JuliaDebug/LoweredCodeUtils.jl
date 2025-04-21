@@ -12,6 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: julia --project -e 'using Pkg; pkg"add https://github.com/serenity4/JuliaInterpreter.jl#codetracking-v2 https://github.com/serenity4/CodeTracking.jl#parametrize-by-mt"'
+      - run: cd docs && julia --project -e 'using Pkg; pkg"add https://github.com/serenity4/JuliaInterpreter.jl#codetracking-v2 https://github.com/serenity4/CodeTracking.jl#parametrize-by-mt"'
       - uses: julia-actions/julia-buildpkg@latest
       - uses: julia-actions/julia-docdeploy@latest
         env:
