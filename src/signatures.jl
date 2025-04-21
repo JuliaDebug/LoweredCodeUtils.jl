@@ -56,7 +56,7 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
     mt = extract_method_table(frame, stmt; eval = false)
     sigsv = @lookup(frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
-    return mt => sigt, lastpc
+    return Pair{Union{Nothing,MethodTable},Any}(mt, sigt), lastpc
 end
 signature(@nospecialize(recurse), frame::Frame, pc) = signature(recurse, frame, pc_expr(frame, pc), pc)
 signature(frame::Frame, pc) = signature(finish_and_return!, frame, pc)
