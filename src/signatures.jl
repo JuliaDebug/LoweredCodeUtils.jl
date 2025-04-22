@@ -52,7 +52,7 @@ function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::I
         stmt = pc_expr(frame, pc)
     end
     isa(stmt, Expr) || return nothing, pc
-    sigsv = lookup(frame, stmt.args[2])::SimpleVector
+    sigsv = lookup(interp, frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
     return sigt, lastpc
 end
