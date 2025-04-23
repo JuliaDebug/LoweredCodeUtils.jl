@@ -24,8 +24,7 @@ function signature(sigsv::SimpleVector)
 end
 
 """
-    sigt, lastpc = signature(recurse, frame, pc)
-    sigt, lastpc = signature(frame, pc)
+    sigt, lastpc = signature([interp::Interpreter=RecursiveInterpreter()], frame::Frame, pc::Int)
 
 Compute the signature-type `sigt` of a method whose definition in `frame` starts at `pc`.
 Generally, `pc` should point to the `Expr(:method, methname)` statement, in which case
@@ -37,28 +36,28 @@ In this case, `lastpc == pc`.
 
 If no 3-argument `:method` expression is found, `sigt` will be `nothing`.
 """
-function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc)
+function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::Int)
     mod = moduleof(frame)
     lastpc = frame.pc = pc
     while !isexpr(stmt, :method, 3)  # wait for the 3-arg version
         if isanonymous_typedef(stmt)
-            lastpc = pc = step_through_methoddef(recurse, frame, stmt)   # define an anonymous function
+            lastpc = pc = step_through_methoddef(interp, frame, stmt)   # define an anonymous function
         elseif is_Typeof_for_anonymous_methoddef(stmt, frame.framecode.src.code, mod)
             return nothing, pc
         else
             lastpc = pc
-            pc = step_expr!(recurse, frame, stmt, true)
+            pc = step_expr!(interp, frame, stmt, true)
             pc === nothing && return nothing, lastpc
         end
         stmt = pc_expr(frame, pc)
     end
     isa(stmt, Expr) || return nothing, pc
-    sigsv = lookup(frame, stmt.args[2])::SimpleVector
+    sigsv = lookup(interp, frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
     return sigt, lastpc
 end
-signature(@nospecialize(recurse), frame::Frame, pc) = signature(recurse, frame, pc_expr(frame, pc), pc)
-signature(frame::Frame, pc) = signature(finish_and_return!, frame, pc)
+signature(interp::Interpreter, frame::Frame, pc::Int) = signature(interp, frame, pc_expr(frame, pc), pc)
+signature(frame::Frame, pc::Int) = signature(RecursiveInterpreter(), frame, pc)
 
 function is_Typeof_for_anonymous_methoddef(@nospecialize(stmt), code::Vector{Any}, mod::Module)
     isexpr(stmt, :call) || return false
@@ -91,12 +90,12 @@ function signature_top(frame, stmt::Expr, pc)
     return minid(stmt.args[2], frame.framecode.src.code, pc)
 end
 
-function step_through_methoddef(@nospecialize(recurse), frame, @nospecialize(stmt))
+function step_through_methoddef(interp::Interpreter, frame::Frame, @nospecialize(stmt))
     while !isexpr(stmt, :method)
-        pc = step_expr!(recurse, frame, stmt, true)
+        pc = step_expr!(interp, frame, stmt, true)
         stmt = pc_expr(frame, pc)
     end
-    return step_expr!(recurse, frame, stmt, true)  # also define the method
+    return step_expr!(interp, frame, stmt, true)  # also define the method
 end
 
 """
@@ -126,7 +125,7 @@ struct SelfCall
 end
 
 """
-    methodinfos, selfcalls = identify_framemethod_calls(frame)
+    methodinfos::Dict{GlobalRef,MethodInfo}, selfcalls::Vector{SelfCall} = identify_framemethod_calls(frame::Frame)
 
 Analyze the code in `frame` to locate method definitions and "self-calls," i.e., calls
 to methods defined in `frame` that occur within `frame`.
@@ -139,7 +138,7 @@ which will correspond to a 3-argument `:method` expression containing a `CodeInf
 `linebody` is the line within the `CodeInfo` body from which the call is made.
 `callee` is the Symbol of the called method.
 """
-function identify_framemethod_calls(frame)
+function identify_framemethod_calls(frame::Frame)
     refs = Pair{GlobalRef,Int}[]
     methodinfos = Dict{GlobalRef,MethodInfo}()
     selfcalls = SelfCall[]
@@ -249,8 +248,10 @@ function normalize_defsig(@nospecialize(def), mod::Module)
 end
 normalize_defsig(@nospecialize(def), frame::Frame) = normalize_defsig(def, moduleof(frame))
 
+const CalledBy = Dict{GlobalRef,Union{GlobalRef,Bool,Nothing}}
+
 function callchain(selfcalls)
-    calledby = Dict{GlobalRef,Union{GlobalRef,Bool,Nothing}}()
+    calledby = CalledBy()
     for sc in selfcalls
         startswith(String(sc.callee.name), '#') || continue
         caller = get(calledby, sc.callee, nothing)
@@ -264,13 +265,15 @@ function callchain(selfcalls)
     return calledby
 end
 
-function set_to_running_name!(@nospecialize(recurse), replacements, frame, methodinfos, selfcall, calledby, callee, caller)
+function set_to_running_name!(interp::Interpreter, replacements::Dict{GlobalRef,GlobalRef}, frame::Frame,
+                              methodinfos::Dict{GlobalRef,MethodInfo}, selfcall::SelfCall,
+                              calledby::CalledBy, callee::GlobalRef, @nospecialize caller#=::Union{GlobalRef,Bool,Nothing}=#)
     if isa(caller, GlobalRef) && startswith(String(caller.name), '#')
         rep = get(replacements, caller, nothing)
         if rep === nothing
             parentcaller = get(calledby, caller, nothing)
             if parentcaller !== nothing
-                set_to_running_name!(recurse, replacements, frame, methodinfos, selfcall, calledby, caller, parentcaller)
+                set_to_running_name!(interp, replacements, frame, methodinfos, selfcall, calledby, caller, parentcaller)
             end
         else
             caller = rep
@@ -285,7 +288,7 @@ function set_to_running_name!(@nospecialize(recurse), replacements, frame, metho
     end
     @assert ismethod1(stmt)
     cname, _pc, _ = try
-        get_running_name(recurse, frame, pc+1, callee, get(replacements, caller, caller))
+        get_running_name(interp, frame, pc+1, callee)
     catch err
         if isa(err, UndefVarError)
             # The function may not be defined, in which case there is nothing to replace
@@ -304,8 +307,7 @@ function set_to_running_name!(@nospecialize(recurse), replacements, frame, metho
 end
 
 """
-    methranges = rename_framemethods!(frame)
-    methranges = rename_framemethods!(recurse, frame)
+    methranges = rename_framemethods!([interp::Interpreter=RecursiveInterpreter()], frame::Frame)
 
 Rename the gensymmed methods in `frame` to match those that are currently active.
 The issues are described in https://github.com/JuliaLang/julia/issues/30908.
@@ -315,7 +317,10 @@ Returns a vector of `name=>start:stop` pairs specifying the range of lines in `f
 at which method definitions occur. In some cases there may be more than one method with
 the same name in the `start:stop` range.
 """
-function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos, selfcalls, calledby)
+function rename_framemethods! end
+
+function _rename_framemethods!(interp::Interpreter, frame::Frame,
+                               methodinfos::Dict{GlobalRef,MethodInfo}, selfcalls::Vector{SelfCall}, calledby::CalledBy)
     src = frame.framecode.src
     replacements = Dict{GlobalRef,GlobalRef}()
     for (callee, caller) in calledby
@@ -323,7 +328,7 @@ function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos,
         idx = findfirst(sc->sc.callee === callee && sc.caller === caller, selfcalls)
         idx === nothing && continue
         try
-            set_to_running_name!(recurse, replacements, frame, methodinfos, selfcalls[idx], calledby, callee, caller)
+            set_to_running_name!(interp, replacements, frame, methodinfos, selfcalls[idx], calledby, callee, caller)
         catch err
             @warn "skipping callee $callee (called by $caller) due to $err"
         end
@@ -338,18 +343,18 @@ function rename_framemethods!(@nospecialize(recurse), frame::Frame, methodinfos,
     return methodinfos
 end
 
-function rename_framemethods!(@nospecialize(recurse), frame::Frame)
+function rename_framemethods!(interp::Interpreter, frame::Frame)
     pc0 = frame.pc
     methodinfos, selfcalls = identify_framemethod_calls(frame)
     calledby = callchain(selfcalls)
-    rename_framemethods!(recurse, frame, methodinfos, selfcalls, calledby)
+    _rename_framemethods!(interp, frame, methodinfos, selfcalls, calledby)
     frame.pc = pc0
     return methodinfos
 end
-rename_framemethods!(frame::Frame) = rename_framemethods!(finish_and_return!, frame)
+rename_framemethods!(frame::Frame) = rename_framemethods!(RecursiveInterpreter(), frame)
 
 """
-    pctop, isgen = find_name_caller_sig(recurse, frame, pc, name, parentname)
+    pctop, isgen = find_name_caller_sig(interp::Interpreter, frame::Frame, pc::Int, name::GlobalRef)
 
 Scans forward from `pc` in `frame` until a method is found that calls `name`.
 `pctop` points to the beginning of that method's signature.
@@ -358,12 +363,12 @@ Scans forward from `pc` in `frame` until a method is found that calls `name`.
 Alternatively, this returns `nothing` if `pc` does not appear to point to either
 a keyword or generated method.
 """
-function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentname)
+function find_name_caller_sig(interp::Interpreter, frame::Frame, pc::Int, name::GlobalRef)
     stmt = pc_expr(frame, pc)
     while true
         pc0 = pc
         while !ismethod3(stmt)
-            pc = next_or_nothing(recurse, frame, pc)
+            pc = next_or_nothing(interp, frame, pc)
             pc === nothing && return nothing
             stmt = pc_expr(frame, pc)
         end
@@ -381,7 +386,7 @@ function find_name_caller_sig(@nospecialize(recurse), frame, pc, name, parentnam
                 iscallto(bodystmt, moduleof(frame), name, body) && return signature_top(frame, stmt, pc), false
             end
         end
-        pc = next_or_nothing(recurse, frame, pc)
+        pc = next_or_nothing(interp, frame, pc)
         pc === nothing && return nothing
         stmt = pc_expr(frame, pc)
     end
@@ -423,11 +428,11 @@ function replacename!(args::AbstractVector, pr)
     return args
 end
 
-function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
-    nameinfo = find_name_caller_sig(recurse, frame, pc, name, parentname)
+function get_running_name(interp::Interpreter, frame::Frame, pc::Int, name::GlobalRef)
+    nameinfo = find_name_caller_sig(interp, frame, pc, name)
     if nameinfo === nothing
         pc = skip_until(@nospecialize(stmt)->isexpr(stmt, :method, 3), frame, pc)
-        pc = next_or_nothing(recurse, frame, pc)
+        pc = next_or_nothing(interp, frame, pc)
         return name, pc, nothing
     end
     pctop, isgen = nameinfo
@@ -439,7 +444,7 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
         pctop -= 1
         stmt = pc_expr(frame, pctop)
     end   # end fix
-    sigtparent, lastpcparent = signature(recurse, frame, pctop)
+    sigtparent, lastpcparent = signature(interp, frame, pctop)
     sigtparent === nothing && return name, pc, lastpcparent
     methparent = whichtt(sigtparent)
     methparent === nothing && return name, pc, lastpcparent  # caller isn't defined, no correction is needed
@@ -462,16 +467,16 @@ function get_running_name(@nospecialize(recurse), frame, pc, name, parentname)
 end
 
 """
-    nextpc = next_or_nothing([recurse], frame, pc)
-    nextpc = next_or_nothing!([recurse], frame)
+    nextpc = next_or_nothing([interp::Interpreter=RecursiveInterpreter()], frame::Frame, pc::Int)
+    nextpc = next_or_nothing!([interp::Interpreter=RecursiveInterpreter()], frame::Frame)
 
 Advance the program counter without executing the corresponding line.
 If `frame` is finished, `nextpc` will be `nothing`.
 """
-next_or_nothing(frame, pc) = next_or_nothing(finish_and_return!, frame, pc)
-next_or_nothing(@nospecialize(recurse), frame, pc) = pc < nstatements(frame.framecode) ? pc+1 : nothing
-next_or_nothing!(frame) = next_or_nothing!(finish_and_return!, frame)
-function next_or_nothing!(@nospecialize(recurse), frame)
+next_or_nothing(frame::Frame, pc::Int) = next_or_nothing(RecursiveInterpreter(), frame, pc)
+next_or_nothing(::Interpreter, frame::Frame, pc::Int) = pc < nstatements(frame.framecode) ? pc+1 : nothing
+next_or_nothing!(frame::Frame) = next_or_nothing!(RecursiveInterpreter(), frame)
+function next_or_nothing!(::Interpreter, frame::Frame)
     pc = frame.pc
     if pc < nstatements(frame.framecode)
         return frame.pc = pc + 1
@@ -480,27 +485,27 @@ function next_or_nothing!(@nospecialize(recurse), frame)
 end
 
 """
-    nextpc = skip_until(predicate, [recurse], frame, pc)
-    nextpc = skip_until!(predicate, [recurse], frame)
+    nextpc = skip_until(predicate, [interp::Interpreter=RecursiveInterpreter()], frame, pc)
+    nextpc = skip_until!(predicate, [interp::Interpreter=RecursiveInterpreter()], frame)
 
 Advance the program counter until `predicate(stmt)` return `true`.
 """
-skip_until(predicate, frame, pc) = skip_until(predicate, finish_and_return!, frame, pc)
-function skip_until(predicate, @nospecialize(recurse), frame, pc)
+skip_until(predicate, frame::Frame, pc::Int) = skip_until(predicate, RecursiveInterpreter(), frame, pc)
+function skip_until(predicate::F, interp::Interpreter, frame::Frame, pc::Int) where F
     stmt = pc_expr(frame, pc)
     while !predicate(stmt)
-        pc = next_or_nothing(recurse, frame, pc)
+        pc = next_or_nothing(interp, frame, pc)
         pc === nothing && return nothing
         stmt = pc_expr(frame, pc)
     end
     return pc
 end
-skip_until!(predicate, frame) = skip_until!(predicate, finish_and_return!, frame)
-function skip_until!(predicate, @nospecialize(recurse), frame)
+skip_until!(predicate, frame::Frame) = skip_until!(predicate, RecursiveInterpreter(), frame)
+function skip_until!(predicate::F, interp::Interpreter, frame::Frame) where F
     pc = frame.pc
     stmt = pc_expr(frame, pc)
     while !predicate(stmt)
-        pc = next_or_nothing!(recurse, frame)
+        pc = next_or_nothing!(interp, frame)
         pc === nothing && return nothing
         stmt = pc_expr(frame, pc)
     end
@@ -508,8 +513,7 @@ function skip_until!(predicate, @nospecialize(recurse), frame)
 end
 
 """
-    ret = methoddef!(recurse, signatures, frame; define=true)
-    ret = methoddef!(signatures, frame; define=true)
+    ret = methoddef!([interp::Interpreter=RecursiveInterpreter()], signatures, frame; define=true)
 
 Compute the signature of a method definition. `frame.pc` should point to a
 `:method` expression. Upon exit, the new signature will be added to `signatures`.
@@ -531,17 +535,17 @@ occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
 """
-function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
+function methoddef!(interp::Interpreter, signatures, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
     framecode, pcin = frame.framecode, pc
     if ismethod3(stmt)
         pc3 = pc
         arg1 = stmt.args[1]
-        sigt, pc = signature(recurse, frame, stmt, pc)
+        sigt, pc = signature(interp, frame, stmt, pc)
         meth = whichtt(sigt)
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
-            pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(recurse, frame)
+            pc = define ? step_expr!(interp, frame, stmt, true) : next_or_nothing!(interp, frame)
         elseif define
-            pc = step_expr!(recurse, frame, stmt, true)
+            pc = step_expr!(interp, frame, stmt, true)
             meth = whichtt(sigt)
         end
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
@@ -549,7 +553,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
         else
             if arg1 === false || arg1 === nothing
                 # If it's anonymous and not defined, define it
-                pc = step_expr!(recurse, frame, stmt, true)
+                pc = step_expr!(interp, frame, stmt, true)
                 meth = whichtt(sigt)
                 isa(meth, Method) && push!(signatures, meth.sig)
                 return pc, pc3
@@ -563,7 +567,7 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
                     @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
                 end
                 if pc == pc3
-                    pc = next_or_nothing!(recurse, frame)
+                    pc = next_or_nothing!(interp, frame)
                 end
             end
         end
@@ -592,62 +596,66 @@ function methoddef!(@nospecialize(recurse), signatures, frame::Frame, @nospecial
     end
     found || return nothing
     while true  # methods containing inner methods may need multiple trips through this loop
-        sigt, pc = signature(recurse, frame, stmt, pc)
+        sigt, pc = signature(interp, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
-            pc = next_or_nothing(recurse, frame, pc)  # this should not check define, we've probably already done this once
+            pc = next_or_nothing(interp, frame, pc)  # this should not check define, we've probably already done this once
             pc === nothing && return nothing   # this was just `function foo end`, signal "no def"
             stmt = pc_expr(frame, pc)
         end
         pc3 = pc
         stmt = stmt::Expr
         name3 = normalize_defsig(stmt.args[1], frame)
-        sigt === nothing && (error("expected a signature"); return next_or_nothing(recurse, frame, pc)), pc3
+        sigt === nothing && (error("expected a signature"); return next_or_nothing(interp, frame, pc)), pc3
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
         frame.pc = pc
-        pc = define ? step_expr!(recurse, frame, stmt, true) : next_or_nothing!(recurse, frame)
+        pc = define ? step_expr!(interp, frame, stmt, true) : next_or_nothing!(interp, frame)
         meth = whichtt(sigt)
         isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
         name === name3 && return pc, pc3     # if this was an inner method we should keep going
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
 end
-methoddef!(@nospecialize(recurse), signatures, frame::Frame, pc::Int; define=true) =
-    methoddef!(recurse, signatures, frame, pc_expr(frame, pc), pc; define=define)
-function methoddef!(@nospecialize(recurse), signatures, frame::Frame; define=true)
+methoddef!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=true) =
+    methoddef!(interp, signatures, frame, pc_expr(frame, pc), pc; define)
+function methoddef!(interp::Interpreter, signatures, frame::Frame; define::Bool=true)
     pc = frame.pc
     stmt = pc_expr(frame, pc)
     if !ismethod(stmt)
-        pc = next_until!(ismethod, recurse, frame, true)
+        pc = next_until!(ismethod, interp, frame, true)
     end
     pc === nothing && error("pc at end of frame without finding a method")
-    methoddef!(recurse, signatures, frame, pc; define=define)
+    methoddef!(interp, signatures, frame, pc; define)
 end
-methoddef!(signatures, frame::Frame; define=true) =
-    methoddef!(finish_and_return!, signatures, frame; define=define)
+methoddef!(signatures, frame::Frame, pc::Int; define::Bool=true) =
+    methoddef!(RecursiveInterpreter(), signatures, frame, pc_expr(frame, pc), pc; define)
+methoddef!(signatures, frame::Frame; define::Bool=true) =
+    methoddef!(RecursiveInterpreter(), signatures, frame; define)
 
-function methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; define=true)
-    ret = methoddef!(recurse, signatures, frame, pc; define=define)
+function methoddefs!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=true)
+    ret = methoddef!(interp, signatures, frame, pc; define)
     pc = ret === nothing ? ret : ret[1]
-    return _methoddefs!(recurse, signatures, frame, pc; define=define)
+    return _methoddefs!(interp, signatures, frame, pc; define)
 end
-function methoddefs!(@nospecialize(recurse), signatures, frame::Frame; define=true)
-    ret = methoddef!(recurse, signatures, frame; define=define)
+function methoddefs!(interp::Interpreter, signatures, frame::Frame; define::Bool=true)
+    ret = methoddef!(interp, signatures, frame; define)
     pc = ret === nothing ? ret : ret[1]
-    return _methoddefs!(recurse, signatures, frame, pc; define=define)
+    return _methoddefs!(interp, signatures, frame, pc; define)
 end
-methoddefs!(signatures, frame::Frame; define=true) =
-    methoddefs!(finish_and_return!, signatures, frame; define=define)
+methoddefs!(signatures, frame::Frame, pc::Int; define::Bool=true) =
+    methoddefs!(RecursiveInterpreter(), signatures, frame, pc; define)
+methoddefs!(signatures, frame::Frame; define::Bool=true) =
+    methoddefs!(RecursiveInterpreter(), signatures, frame; define)
 
-function _methoddefs!(@nospecialize(recurse), signatures, frame::Frame, pc; define=define)
+function _methoddefs!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=define)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
-            pc = next_until!(ismethod, recurse, frame, true)
+            pc = next_until!(ismethod, interp, frame, true)
         end
         pc === nothing && break
-        ret = methoddef!(recurse, signatures, frame, pc; define=define)
+        ret = methoddef!(interp, signatures, frame, pc; define)
         pc = ret === nothing ? ret : ret[1]
     end
     return pc

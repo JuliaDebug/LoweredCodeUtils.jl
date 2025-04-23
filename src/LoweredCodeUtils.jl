@@ -10,10 +10,10 @@ module LoweredCodeUtils
 # the VS Code extension integration.
 
 using JuliaInterpreter
-using JuliaInterpreter: SSAValue, SlotNumber, Frame
+using JuliaInterpreter: SSAValue, SlotNumber, Frame, Interpreter, RecursiveInterpreter
 using JuliaInterpreter: codelocation, is_global_ref, is_global_ref_egal, is_quotenode_egal, is_return,
                         lookup, lookup_return, linetable, moduleof, next_until!, nstatements, pc_expr,
-                        step_expr!, whichtt, finish_and_return!
+                        step_expr!, whichtt
 
 include("packagedef.jl")
 

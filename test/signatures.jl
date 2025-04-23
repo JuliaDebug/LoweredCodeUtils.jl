@@ -3,7 +3,6 @@ module Signatures
 using LoweredCodeUtils
 using InteractiveUtils
 using JuliaInterpreter
-using JuliaInterpreter: finish_and_return!
 using Core: CodeInfo
 using Base.Meta: isexpr
 using Test
@@ -382,9 +381,9 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     pcstop = findfirst(LoweredCodeUtils.ismethod3, frame.framecode.src.code)
     pc = 1
     while pc < pcstop
-        pc = JuliaInterpreter.step_expr!(finish_and_return!, frame, true)
+        pc = JuliaInterpreter.step_expr!(frame, true)
     end
-    pc = methoddef!(finish_and_return!, signatures, frame, pc; define=true)
+    pc = methoddef!(signatures, frame, pc; define=true)
     @test Tuple{typeof(Lowering.f568)} ∈ signatures
     @test Lowering.f568() == -2
 
