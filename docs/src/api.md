@@ -19,6 +19,12 @@ selective_eval!
 selective_eval_fromstart!
 ```
 
+## Interpreter
+
+```@docs
+LoweredCodeUtils.SelectiveInterpreter
+```
+
 ## Internal utilities
 
 ```@docs

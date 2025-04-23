@@ -1027,7 +1027,7 @@ end
         isrequired::T
     end
 
-A selective interpreter that executes only the statements marked `true` in `isrequired`.
+An `JuliaInterpreter.Interpreter` that executes only the statements marked `true` in `isrequired`.
 Note that this interpreter does not recurse into callee frames.
 That is, when `JuliaInterpreter.finish!(interp::SelectiveInterpreter, frame, ...)` is
 performed, the `frame` will be executed selectively according to `interp.isrequired`, but
