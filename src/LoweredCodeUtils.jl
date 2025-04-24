@@ -12,10 +12,10 @@ module LoweredCodeUtils
 using CodeTracking: MethodInfoKey
 
 using JuliaInterpreter
-using JuliaInterpreter: SSAValue, SlotNumber, Frame
-using JuliaInterpreter: @lookup, moduleof, pc_expr, step_expr!, is_global_ref, is_global_ref_egal, is_quotenode_egal, whichtt,
-                        next_until!, finish_and_return!, get_return, nstatements, codelocation, linetable,
-                        is_return, lookup_return, extract_method_table
+using JuliaInterpreter: SSAValue, SlotNumber, Frame, Interpreter, RecursiveInterpreter
+using JuliaInterpreter: codelocation, is_global_ref, is_global_ref_egal, is_quotenode_egal, is_return,
+                        lookup, lookup_return, linetable, moduleof, next_until!, nstatements, pc_expr,
+                        step_expr!, whichtt, extract_method_table
 
 include("packagedef.jl")
 
