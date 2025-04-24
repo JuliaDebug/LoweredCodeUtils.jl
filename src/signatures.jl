@@ -53,7 +53,7 @@ function signature(@nospecialize(recurse), frame::Frame, @nospecialize(stmt), pc
         stmt = pc_expr(frame, pc)
     end
     isa(stmt, Expr) || return nothing, pc
-    mt = extract_method_table(frame, stmt; eval = false)
+    mt = extract_method_table(frame, stmt)
     sigsv = @lookup(frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
     return MethodInfoKey(mt, sigt), lastpc
@@ -189,7 +189,9 @@ function identify_framemethod_calls(frame)
             end
             msrc = stmt.args[3]
             if msrc isa CodeInfo
-                key = key::Union{GlobalRef,Bool,Nothing}
+                # XXX: Properly support interpolated `Core.MethodTable`. This will require using
+                # `stmt.args[2]` instead of `stmt.args[1]` to identify the parent function.
+                isa(key, Union{GlobalRef,Bool,Nothing}) || continue
                 for (j, mstmt) in enumerate(msrc.code)
                     isa(mstmt, Expr) || continue
                     jj = j
@@ -548,7 +550,7 @@ function methoddef!(@nospecialize(recurse), signatures::Vector{MethodInfoKey}, f
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
             push!(signatures, mt => meth.sig)
         else
-            if arg1 === false || arg1 === nothing
+            if arg1 === false || arg1 === nothing || isa(mt, MethodTable)
                 # If it's anonymous and not defined, define it
                 pc = step_expr!(recurse, frame, stmt, true)
                 meth = whichtt(sigt, mt)

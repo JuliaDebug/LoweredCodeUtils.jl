@@ -505,9 +505,12 @@ end
 
 end
 
+module ExternalMT
+    Base.Experimental.@MethodTable method_table
+    macro overlay(ex) esc(:(Base.Experimental.@overlay $method_table $ex)) end
+end
+
 @testset "Support for external method tables" begin
-    ExternalMT = Module()
-    Core.eval(ExternalMT, :(Base.Experimental.@MethodTable method_table))
     signatures = MethodInfoKey[]
 
     ex = :(foo(x) = "foo")
@@ -525,6 +528,15 @@ end
     @test length(signatures) == 1
     (mt, sig) = pop!(signatures)
     @test (mt, sig) === (ExternalMT.method_table, Tuple{typeof(ExternalMT.foo), Any})
+
+    ex = :(@overlay foo(x::Int64) = "overlayed foo, second edition")
+    Core.eval(ExternalMT, ex)
+    frame = Frame(ExternalMT, ex)
+    pc = methoddefs!(signatures, frame; define = false)
+    @test length(signatures) == 1
+    (mt, sig) = pop!(signatures)
+    @test (mt, sig) === (ExternalMT.method_table, Tuple{typeof(ExternalMT.foo), Int64})
+    LoweredCodeUtils.identify_framemethod_calls(frame) # make sure this does not throw
 end
 
 end # module signatures
