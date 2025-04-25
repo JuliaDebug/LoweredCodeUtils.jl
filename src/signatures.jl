@@ -24,9 +24,9 @@ function signature(sigsv::SimpleVector)
 end
 
 """
-    sigt, lastpc = signature([interp::Interpreter=RecursiveInterpreter()], frame::Frame, pc::Int)
+    (mt, sigt), lastpc = signature([interp::Interpreter=RecursiveInterpreter()], frame::Frame, pc::Int)
 
-Compute the signature-type `sigt` of a method whose definition in `frame` starts at `pc`.
+Compute the method table `mt` and signature-type `sigt` of a method whose definition in `frame` starts at `pc`.
 Generally, `pc` should point to the `Expr(:method, methname)` statement, in which case
 `lastpc` is the final statement number in `frame` that is part of the signature
 (i.e, the line above the 3-argument `:method` expression).
@@ -34,7 +34,7 @@ Alternatively, `pc` can point to the 3-argument `:method` expression,
 as long as all the relevant SSAValues have been assigned.
 In this case, `lastpc == pc`.
 
-If no 3-argument `:method` expression is found, `sigt` will be `nothing`.
+If no 3-argument `:method` expression is found, `nothing` will be returned in place of `(mt, sigt)`.
 """
 function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::Int)
     mod = moduleof(frame)
@@ -620,9 +620,9 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
 end
-methoddef!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=true) =
+methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
     methoddef!(interp, signatures, frame, pc_expr(frame, pc), pc; define)
-function methoddef!(interp::Interpreter, signatures, frame::Frame; define::Bool=true)
+function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true)
     pc = frame.pc
     stmt = pc_expr(frame, pc)
     if !ismethod(stmt)
@@ -631,27 +631,27 @@ function methoddef!(interp::Interpreter, signatures, frame::Frame; define::Bool=
     pc === nothing && error("pc at end of frame without finding a method")
     methoddef!(interp, signatures, frame, pc; define)
 end
-methoddef!(signatures, frame::Frame, pc::Int; define::Bool=true) =
+methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
     methoddef!(RecursiveInterpreter(), signatures, frame, pc_expr(frame, pc), pc; define)
-methoddef!(signatures, frame::Frame; define::Bool=true) =
+methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddef!(RecursiveInterpreter(), signatures, frame; define)
 
-function methoddefs!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=true)
+function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true)
     ret = methoddef!(interp, signatures, frame, pc; define)
     pc = ret === nothing ? ret : ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
-function methoddefs!(interp::Interpreter, signatures, frame::Frame; define::Bool=true)
+function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true)
     ret = methoddef!(interp, signatures, frame; define)
     pc = ret === nothing ? ret : ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
-methoddefs!(signatures, frame::Frame, pc::Int; define::Bool=true) =
+methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
     methoddefs!(RecursiveInterpreter(), signatures, frame, pc; define)
-methoddefs!(signatures, frame::Frame; define::Bool=true) =
+methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddefs!(RecursiveInterpreter(), signatures, frame; define)
 
-function _methoddefs!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=define)
+function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=define)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
