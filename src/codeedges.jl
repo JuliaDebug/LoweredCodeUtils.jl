@@ -242,27 +242,25 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             add_inner!(cl, icl, i)
             continue
         elseif isexpr(stmt, :method)
-            if length(stmt.args) === 3 && (arg3 = stmt.args[3]; arg3 isa CodeInfo)
-                icl = CodeLinks(cl.thismod, arg3)
-                add_inner!(cl, icl, i)
-            end
-            name = stmt.args[1]
-            if isa(name, GlobalRef) || isa(name, Symbol)
+            if length(stmt.args) === 1
+                # A function with no methods was defined. Associate its new binding to it.
+                name = stmt.args[1]
                 if isa(name, Symbol)
                     name = GlobalRef(cl.thismod, name)
                 end
-                assign = get(cl.nameassigns, name, nothing)
-                if assign === nothing
-                    cl.nameassigns[name] = assign = Int[]
+                if !isa(name, GlobalRef)
+                    @show stmt
+                    error("name ", typeof(name), " not recognized")
                 end
+                assign = get!(Vector{Int}, cl.nameassigns, name)
                 push!(assign, i)
                 targetstore = get!(Links, cl.namepreds, name)
                 target = P(name, targetstore)
                 add_links!(target, stmt, cl)
-            elseif name in (nothing, false)
-            else
-                @show stmt
-                error("name ", typeof(name), " not recognized")
+            elseif length(stmt.args) === 3 && (arg3 = stmt.args[3]; arg3 isa CodeInfo) # method definition
+                # A method was defined for an existing function.
+                icl = CodeLinks(cl.thismod, arg3)
+                add_inner!(cl, icl, i)
             end
             rhs = stmt
             target = P(SSAValue(i), cl.ssapreds[i])
