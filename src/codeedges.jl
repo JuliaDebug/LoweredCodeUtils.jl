@@ -106,13 +106,13 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
     used = BitSet()
     cfg = compute_basic_blocks(src.code)
     for stmt in src.code
-        Core.Compiler.scan_ssa_use!(push!, used, stmt)
+        CC.scan_ssa_use!(push!, used, stmt)
     end
     @static if isdefined(Base, :__has_internal_change) && Base.__has_internal_change(v"1.12-alpha", :printcodeinfocalls)
         sptypes = let parent = src.parent
             parent isa MethodInstance ?
-                Core.Compiler.sptypes_from_meth_instance(parent) :
-                Core.Compiler.EMPTY_SPTYPES
+                CC.sptypes_from_meth_instance(parent) :
+                CC.EMPTY_SPTYPES
         end
     end
     line_info_preprinter = Base.IRShow.lineinfo_disabled
@@ -763,8 +763,6 @@ end
 
 ## Add control-flow
 
-using Core: CodeInfo
-using Core.Compiler: CFG, BasicBlock, compute_basic_blocks
 
 # The goal of this function is to request concretization of the minimal necessary control
 # flow to evaluate statements whose concretization have already been requested.

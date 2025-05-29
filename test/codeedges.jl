@@ -2,6 +2,7 @@ module codeedges
 
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
+using LoweredCodeUtils: CC
 using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
@@ -324,7 +325,7 @@ module ModSelective end
     src = frame.framecode.src
     edges = CodeEdges(ModEval, src)
     isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src, edges))  # initially mark only the constructor
-    bbs = Core.Compiler.compute_basic_blocks(src.code)
+    bbs = CC.compute_basic_blocks(src.code)
     for (iblock, block) in enumerate(bbs.blocks)
         r = LoweredCodeUtils.rng(block)
         if iblock == length(bbs.blocks)

@@ -1,15 +1,15 @@
-const AnySSAValue = Union{Core.Compiler.SSAValue,JuliaInterpreter.SSAValue}
-const AnySlotNumber = Union{Core.Compiler.SlotNumber,JuliaInterpreter.SlotNumber}
+const AnySSAValue = Union{Core.IR.SSAValue,JuliaInterpreter.SSAValue}
+const AnySlotNumber = Union{Core.IR.SlotNumber,JuliaInterpreter.SlotNumber}
 
 # to circumvent https://github.com/JuliaLang/julia/issues/37342, we inline these `isa`
 # condition checks at surface AST level
 # https://github.com/JuliaLang/julia/pull/38905 will get rid of the need of these hacks
 macro isssa(stmt)
-    :($(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(Core.Compiler, :SSAValue))) ||
+    :($(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(Core.IR, :SSAValue))) ||
       $(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(JuliaInterpreter, :SSAValue))))
 end
 macro issslotnum(stmt)
-    :($(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(Core.Compiler, :SlotNumber))) ||
+    :($(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(Core.IR, :SlotNumber))) ||
       $(GlobalRef(Core, :isa))($(esc(stmt)), $(GlobalRef(JuliaInterpreter, :SlotNumber))))
 end
 
@@ -211,8 +211,8 @@ end
 
 showempty(list) = isempty(list) ? '∅' : list
 
-# Smooth the transition between Core.Compiler and Base
-rng(bb::Core.Compiler.BasicBlock) = (r = bb.stmts; return Core.Compiler.first(r):Core.Compiler.last(r))
+# Smooth the transition between CC and Base (not requried for v1.12 and above)
+rng(bb::BasicBlock) = (r = bb.stmts; return CC.first(r):CC.last(r))
 
 function pushall!(dest, src)
     for item in src
@@ -224,7 +224,7 @@ end
 # computes strongly connected components of a control flow graph `cfg`
 # NOTE adapted from https://github.com/JuliaGraphs/Graphs.jl/blob/5878e7be4d68b2a1c179d1367aea670db115ebb5/src/connectivity.jl#L265-L357
 # since to load an entire Graphs.jl is a bit cost-ineffective in terms of a trade-off of latency vs. maintainability
-function strongly_connected_components(g::Core.Compiler.CFG)
+function strongly_connected_components(g::CFG)
     T = Int
     zero_t = zero(T)
     one_t = one(T)
@@ -322,12 +322,12 @@ function strongly_connected_components(g::Core.Compiler.CFG)
 end
 
 # compatibility with Graphs.jl interfaces
-@inline nv(cfg::Core.Compiler.CFG) = length(cfg.blocks)
-@inline vertices(cfg::Core.Compiler.CFG) = 1:nv(cfg)
-@inline outneighbors(cfg::Core.Compiler.CFG, v) = cfg.blocks[v].succs
+@inline nv(cfg::CFG) = length(cfg.blocks)
+@inline vertices(cfg::CFG) = 1:nv(cfg)
+@inline outneighbors(cfg::CFG, v) = cfg.blocks[v].succs
 
 # using Graphs: SimpleDiGraph, add_edge!, strongly_connected_components as oracle_scc
-# function cfg_to_sdg(cfg::Core.Compiler.CFG)
+# function cfg_to_sdg(cfg::CFG)
 #     g = SimpleDiGraph(length(cfg.blocks))
 #     for (v, block) in enumerate(cfg.blocks)
 #         for succ in block.succs
