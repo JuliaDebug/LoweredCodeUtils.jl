@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Signatures and renaming · LoweredCodeUtils</title><meta name="title" content="Signatures and renaming · LoweredCodeUtils"/><meta property="og:title" content="Signatures and renaming · LoweredCodeUtils"/><meta property="twitter:title" content="Signatures and renaming · LoweredCodeUtils"/><meta name="description" content="Documentation for LoweredCodeUtils."/><meta property="og:description" content="Documentation for LoweredCodeUtils."/><meta property="twitter:description" content="Documentation for LoweredCodeUtils."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">LoweredCodeUtils</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Signatures and renaming</a></li><li><a class="tocitem" href="../edges/">Edges</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Signatures and renaming</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Signatures and renaming</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaDebug/LoweredCodeUtils.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaDebug/LoweredCodeUtils.jl/blob/master/docs/src/signatures.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Signatures-and-renaming"><a class="docs-heading-anchor" href="#Signatures-and-renaming">Signatures and renaming</a><a id="Signatures-and-renaming-1"></a><a class="docs-heading-anchor-permalink" href="#Signatures-and-renaming" title="Permalink"></a></h1><p>We can demonstrate some of this package&#39;s functionality with the following simple example:</p><pre><code class="language-julia hljs">julia&gt; ex = :(f(x; color::Symbol=:green) = 2x)
+:(f(x; color::Symbol = :green) = begin
+          #= REPL[1]:1 =#
+          2x
+      end)
+
+julia&gt; eval(ex)
+f (generic function with 1 method)
+
+julia&gt; f(3)
+6</code></pre><p>Things get more interesting (and complicated) when we examine the lowered code:</p><pre><code class="language-julia hljs">julia&gt; lwr = Meta.lower(Main, ex)
+:($(Expr(:thunk, CodeInfo(
+    @ none within `top-level scope&#39;
+1 ─       $(Expr(:thunk, CodeInfo(
+    @ none within `top-level scope&#39;
+1 ─     return $(Expr(:method, :f))
+)))
+│         $(Expr(:thunk, CodeInfo(
+    @ none within `top-level scope&#39;
+1 ─     return $(Expr(:method, Symbol(&quot;#f#2&quot;)))
+)))
+│         $(Expr(:method, :f))
+│         $(Expr(:method, Symbol(&quot;#f#2&quot;)))
+│   %5  = Core.typeof(var&quot;#f#2&quot;)
+│   %6  = Core.Typeof(f)
+│   %7  = Core.svec(%5, Symbol, %6, Core.Any)
+│   %8  = Core.svec()
+│   %9  = Core.svec(%7, %8, $(QuoteNode(:(#= REPL[1]:1 =#))))
+│         $(Expr(:method, Symbol(&quot;#f#2&quot;), :(%9), CodeInfo(quote
+    $(Expr(:meta, :nkw, 1))
+    2 * x
+    return %2
+end)))
+│         $(Expr(:method, :f))
+│   %12 = Core.Typeof(f)
+│   %13 = Core.svec(%12, Core.Any)
+│   %14 = Core.svec()
+│   %15 = Core.svec(%13, %14, $(QuoteNode(:(#= REPL[1]:1 =#))))
+│         $(Expr(:method, :f, :(%15), CodeInfo(quote
+    var&quot;#f#2&quot;(:green, #self#, x)
+    return %1
+end)))
+│         $(Expr(:method, :f))
+│   %18 = Core.Typeof(f)
+│   %19 = Core.kwftype(%18)
+│   %20 = Core.Typeof(f)
+│   %21 = Core.svec(%19, Core.Any, %20, Core.Any)
+│   %22 = Core.svec()
+│   %23 = Core.svec(%21, %22, $(QuoteNode(:(#= REPL[1]:1 =#))))
+│         $(Expr(:method, :f, :(%23), CodeInfo(quote
+    Base.haskey(@_2, :color)
+    unless %1 goto %11
+    Base.getindex(@_2, :color)
+    %3 isa Symbol
+    unless %4 goto %7
+    goto %9
+    %new(Core.TypeError, Symbol(&quot;keyword argument&quot;), :color, Symbol, %3)
+    Core.throw(%7)
+    @_6 = %3
+    goto %12
+    @_6 = :green
+    color = @_6
+    Core.tuple(:color)
+    Core.apply_type(Core.NamedTuple, %13)
+    Base.structdiff(@_2, %14)
+    Base.pairs(%15)
+    Base.isempty(%16)
+    unless %17 goto %20
+    goto %21
+    Base.kwerr(@_2, @_3, x)
+    var&quot;#f#2&quot;(color, @_3, x)
+    return %21
+end)))
+│   %25 = f
+│   %26 = Core.ifelse(false, false, %25)
+└──       return %26
+))))</code></pre><p>This reveals the <em>three</em> methods actually got defined:</p><ul><li>one method of <code>f</code> with a single positional argument (this is the second 3-argument <code>:method</code> expression)</li><li>a keyword-handling method that checks the names of supplied keyword arguments and fills in defaults (this is the third 3-argument <code>:method</code> expression).  This method can be obtained from <code>Core.kwfunc(f)</code>, which returns a function named <code>f##kw</code>.</li><li>a &quot;keyword-body&quot; method that actually does the work specifies by our function definition. This method gets called by the other two. (This is the first 3-argument <code>:method</code> expression.)</li></ul><p>From examining the lowered code we might guess that this function is called <code>#f#2</code>. What happens if we try to get it?</p><pre><code class="language-julia hljs">julia&gt; fbody = var&quot;#f#2&quot;
+ERROR: UndefVarError: #f#2 not defined
+Stacktrace:
+ [1] top-level scope at REPL[6]:1</code></pre><p>Curiously, however, there is a closely-related function, and looking at its body code we see it is the one we wanted:</p><pre><code class="language-julia hljs">julia&gt; fbody = var&quot;#f#1&quot;
+#f#1 (generic function with 1 method)
+
+julia&gt; mbody = first(methods(fbody))
+#f#1(color::Symbol, ::typeof(f), x) in Main at REPL[1]:1
+
+julia&gt; Base.uncompressed_ast(mbody)
+CodeInfo(
+    @ REPL[1]:1 within `#f#1&#39;
+1 ─      nothing
+│   %2 = 2 * x
+└──      return %2
+)</code></pre><p>It&#39;s named <code>#f#1</code>, rather than <code>#f#2</code>, because it was actually defined by that <code>eval(ex)</code> command at the top of this page. That <code>eval</code> caused it to be lowered once, and calling <code>Meta.lower</code> causes it to be lowered a second time, with different generated names.</p><p>We can obtain the running version more directly (without having to guess) via the following:</p><pre><code class="language-julia hljs">julia&gt; m = first(methods(f))
+f(x; color) in Main at REPL[1]:1
+
+julia&gt; using LoweredCodeUtils
+
+julia&gt; bodymethod(m)
+#f#1(color::Symbol, ::typeof(f), x) in Main at REPL[1]:1</code></pre><p>We can also rename these methods, if we first turn it into a <code>frame</code>:</p><pre><code class="language-julia hljs">julia&gt; using JuliaInterpreter
+
+julia&gt; frame = Frame(Main, lwr.args[1])
+Frame for Main
+   1 0  1 ─       $(Expr(:thunk, CodeInfo(
+   2 0  1 ─     return $(Expr(:method, :f))
+   3 0  )))
+⋮
+
+julia&gt; rename_framemethods!(frame)
+Dict{Symbol,LoweredCodeUtils.MethodInfo} with 3 entries:
+  :f             =&gt; MethodInfo(11, 24, [1])
+  Symbol(&quot;#f#2&quot;) =&gt; MethodInfo(4, 10, [2])
+  Symbol(&quot;#f#1&quot;) =&gt; MethodInfo(4, 10, [2])
+
+julia&gt; frame.framecode.src
+CodeInfo(
+    @ none within `top-level scope&#39;
+1 ─     $(Expr(:thunk, CodeInfo(
+    @ none within `top-level scope&#39;
+1 ─     return $(Expr(:method, :f))
+)))
+│       $(Expr(:thunk, CodeInfo(
+    @ none within `top-level scope&#39;
+1 ─     return $(Expr(:method, Symbol(&quot;#f#1&quot;)))
+)))
+│       $(Expr(:method, :f))
+│       $(Expr(:method, Symbol(&quot;#f#1&quot;)))
+│       ($(QuoteNode(typeof)))(var&quot;#f#1&quot;)
+│       ($(QuoteNode(Core.Typeof)))(f)
+│       ($(QuoteNode(Core.svec)))(%J5, Symbol, %J6, $(QuoteNode(Any)))
+│       ($(QuoteNode(Core.svec)))()
+│       ($(QuoteNode(Core.svec)))(%J7, %J8, $(QuoteNode(:(#= REPL[1]:1 =#))))
+│       $(Expr(:method, Symbol(&quot;#f#1&quot;), %J9, CodeInfo(quote
+    $(Expr(:meta, :nkw, 1))
+    2 * x
+    return %2
+end)))
+│       $(Expr(:method, :f))
+│       ($(QuoteNode(Core.Typeof)))(f)
+│       ($(QuoteNode(Core.svec)))(%J12, $(QuoteNode(Any)))
+│       ($(QuoteNode(Core.svec)))()
+│       ($(QuoteNode(Core.svec)))(%J13, %J14, $(QuoteNode(:(#= REPL[1]:1 =#))))
+│       $(Expr(:method, :f, %J15, CodeInfo(quote
+    var&quot;#f#1&quot;(:green, #self#, x)
+    return %1
+end)))
+│       $(Expr(:method, :f))
+│       ($(QuoteNode(Core.Typeof)))(f)
+│       ($(QuoteNode(Core.kwftype)))(%J18)
+│       ($(QuoteNode(Core.Typeof)))(f)
+│       ($(QuoteNode(Core.svec)))(%J19, $(QuoteNode(Any)), %J20, $(QuoteNode(Any)))
+│       ($(QuoteNode(Core.svec)))()
+│       ($(QuoteNode(Core.svec)))(%J21, %J22, $(QuoteNode(:(#= REPL[1]:1 =#))))
+│       $(Expr(:method, :f, %J23, CodeInfo(quote
+    Base.haskey(@_2, :color)
+    unless %1 goto %11
+    Base.getindex(@_2, :color)
+    %3 isa Symbol
+    unless %4 goto %7
+    goto %9
+    %new(Core.TypeError, Symbol(&quot;keyword argument&quot;), :color, Symbol, %3)
+    Core.throw(%7)
+    @_6 = %3
+    goto %12
+    @_6 = :green
+    color = @_6
+    Core.tuple(:color)
+    Core.apply_type(Core.NamedTuple, %13)
+    Base.structdiff(@_2, %14)
+    Base.pairs(%15)
+    Base.isempty(%16)
+    unless %17 goto %20
+    goto %21
+    Base.kwerr(@_2, @_3, x)
+    var&quot;#f#1&quot;(color, @_3, x)
+    return %21
+end)))
+│       f
+│       ($(QuoteNode(ifelse)))(false, false, %J25)
+└──     return %J26
+)</code></pre><p>While there are a few differences in representation stemming from converting it to a frame, you can see that the <code>#f#2</code>s have been changed to <code>#f#1</code>s to match the currently-running names.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../edges/">Edges »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.10.1 on <span class="colophon-date" title="Tuesday 1 July 2025 09:19">Tuesday 1 July 2025</span>. Using Julia version 1.11.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
