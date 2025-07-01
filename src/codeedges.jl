@@ -1050,7 +1050,7 @@ function JuliaInterpreter.get_return(interp::SelectiveInterpreter, frame::Frame)
     node = pc_expr(frame, pc)
     if is_return(node)
         if interp.isrequired[pc]
-            return lookup_return(frame, node)
+            return lookup_return(interp.inner, frame, node)
         end
     else
         if isassigned(frame.framedata.ssavalues, pc)
