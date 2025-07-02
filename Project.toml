@@ -1,12 +1,14 @@
 name = "LoweredCodeUtils"
 uuid = "6f1432cf-f94c-5a45-995e-cdbf5db27b0b"
-version = "3.3.1"
+version = "3.4.0"
 authors = ["Tim Holy <tim.holy@gmail.com>"]
 
 [deps]
+Compiler = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
 JuliaInterpreter = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
 
 [compat]
+Compiler = "0.1"
 JuliaInterpreter = "0.10"
 julia = "1.10"
 

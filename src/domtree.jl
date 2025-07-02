@@ -5,7 +5,6 @@
 
 # A few items needed to be added:
 
-using Core.Compiler: BasicBlock
 import Base: length, copy, copy!
 
 # END additions
