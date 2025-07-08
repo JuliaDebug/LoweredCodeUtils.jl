@@ -9,7 +9,8 @@ using Compiler: Compiler as CC
 using .CC:
     BasicBlock, CFG,
     compute_basic_blocks, construct_domtree, construct_postdomtree,
-    nearest_common_dominator, postdominates
+    nearest_common_dominator, postdominates,
+    IRShow
 using Base.Meta: isexpr
 
 const SSAValues = Union{Core.IR.SSAValue, JuliaInterpreter.SSAValue}
