@@ -9,8 +9,14 @@ using Compiler: Compiler as CC
 using .CC:
     BasicBlock, CFG,
     compute_basic_blocks, construct_domtree, construct_postdomtree,
-    nearest_common_dominator, postdominates,
-    IRShow
+    nearest_common_dominator, postdominates
+
+@static if isdefined(CC, :IRShow)
+    using .CC: IRShow
+else
+    using Base: IRShow
+end
+
 using Base.Meta: isexpr
 
 const SSAValues = Union{Core.IR.SSAValue, JuliaInterpreter.SSAValue}
