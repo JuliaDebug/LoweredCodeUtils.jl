@@ -115,16 +115,16 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
                 CC.EMPTY_SPTYPES
         end
     end
-    line_info_preprinter = Base.IRShow.lineinfo_disabled
-    line_info_postprinter = Base.IRShow.default_expr_type_printer
+    line_info_preprinter = IRShow.lineinfo_disabled
+    line_info_postprinter = IRShow.default_expr_type_printer
     preprint(io)
     bb_idx_prev = bb_idx = 1
     for idx = 1:length(src.code)
         preprint(io, idx)
         @static if isdefined(Base, :__has_internal_change) && Base.__has_internal_change(v"1.12-alpha", :printcodeinfocalls)
-            bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, sptypes, used, cfg, bb_idx)
+            bb_idx = IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, sptypes, used, cfg, bb_idx)
         else
-            bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
+            bb_idx = IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
         end
         postprint(io, idx, bb_idx != bb_idx_prev)
         bb_idx_prev = bb_idx
