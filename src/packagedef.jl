@@ -5,7 +5,6 @@ using Core.IR: CodeInfo, GotoIfNot, GotoNode, IR, MethodInstance, ReturnNode
 @static if isdefined(Core.IR, :EnterNode)
     using Core.IR: EnterNode
 end
-using Compiler: Compiler as CC
 using .CC:
     BasicBlock, CFG,
     compute_basic_blocks, construct_domtree, construct_postdomtree,
