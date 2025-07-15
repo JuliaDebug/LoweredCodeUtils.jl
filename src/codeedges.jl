@@ -249,7 +249,6 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
                     name = GlobalRef(cl.thismod, name)
                 end
                 if !isa(name, GlobalRef)
-                    @show stmt
                     error("name ", typeof(name), " not recognized")
                 end
                 assign = get!(Vector{Int}, cl.nameassigns, name)
