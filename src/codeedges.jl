@@ -106,25 +106,25 @@ function print_with_code(preprint, postprint, io::IO, src::CodeInfo)
     used = BitSet()
     cfg = compute_basic_blocks(src.code)
     for stmt in src.code
-        Core.Compiler.scan_ssa_use!(push!, used, stmt)
+        CC.scan_ssa_use!(push!, used, stmt)
     end
     @static if isdefined(Base, :__has_internal_change) && Base.__has_internal_change(v"1.12-alpha", :printcodeinfocalls)
         sptypes = let parent = src.parent
             parent isa MethodInstance ?
-                Core.Compiler.sptypes_from_meth_instance(parent) :
-                Core.Compiler.EMPTY_SPTYPES
+                CC.sptypes_from_meth_instance(parent) :
+                CC.EMPTY_SPTYPES
         end
     end
-    line_info_preprinter = Base.IRShow.lineinfo_disabled
-    line_info_postprinter = Base.IRShow.default_expr_type_printer
+    line_info_preprinter = IRShow.lineinfo_disabled
+    line_info_postprinter = IRShow.default_expr_type_printer
     preprint(io)
     bb_idx_prev = bb_idx = 1
     for idx = 1:length(src.code)
         preprint(io, idx)
         @static if isdefined(Base, :__has_internal_change) && Base.__has_internal_change(v"1.12-alpha", :printcodeinfocalls)
-            bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, sptypes, used, cfg, bb_idx)
+            bb_idx = IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, sptypes, used, cfg, bb_idx)
         else
-            bb_idx = Base.IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
+            bb_idx = IRShow.show_ir_stmt(io, src, idx, line_info_preprinter, line_info_postprinter, used, cfg, bb_idx)
         end
         postprint(io, idx, bb_idx != bb_idx_prev)
         bb_idx_prev = bb_idx
@@ -760,8 +760,6 @@ end
 
 ## Add control-flow
 
-using Core: CodeInfo
-using Core.Compiler: CFG, BasicBlock, compute_basic_blocks
 
 # The goal of this function is to request concretization of the minimal necessary control
 # flow to evaluate statements whose concretization have already been requested.
@@ -1047,7 +1045,7 @@ function JuliaInterpreter.get_return(interp::SelectiveInterpreter, frame::Frame)
     node = pc_expr(frame, pc)
     if is_return(node)
         if interp.isrequired[pc]
-            return lookup_return(frame, node)
+            return lookup_return(interp.inner, frame, node)
         end
     else
         if isassigned(frame.framedata.ssavalues, pc)

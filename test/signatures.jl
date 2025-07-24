@@ -323,7 +323,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     methoddefs!(signatures, frame; define=false)
     @test !isempty(signatures)
 
-    # Inner methods in structs. Comes up in, e.g., Core.Compiler.Params.
+    # Inner methods in structs. Comes up in, e.g., CC.Params.
     # The body of CustomMS is an SSAValue.
     ex = quote
         struct MyStructWithMeth

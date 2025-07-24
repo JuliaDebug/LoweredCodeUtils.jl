@@ -5,11 +5,20 @@ using Core.IR: CodeInfo, GotoIfNot, GotoNode, IR, MethodInstance, ReturnNode
 @static if isdefined(Core.IR, :EnterNode)
     using Core.IR: EnterNode
 end
-using Core.Compiler: construct_domtree, construct_postdomtree, nearest_common_dominator,
-    postdominates
+using .CC:
+    BasicBlock, CFG,
+    compute_basic_blocks, construct_domtree, construct_postdomtree,
+    nearest_common_dominator, postdominates
+
+@static if isdefined(CC, :IRShow)
+    using .CC: IRShow
+else
+    using Base: IRShow
+end
+
 using Base.Meta: isexpr
 
-const SSAValues = Union{Core.Compiler.SSAValue, JuliaInterpreter.SSAValue}
+const SSAValues = Union{Core.IR.SSAValue, JuliaInterpreter.SSAValue}
 
 const trackedheads = (:method,)    # Revise uses this (for now), don't delete; also update test/hastrackedexpr if this list gets expanded
 const structdecls = (:_structtype, :_abstracttype, :_primitivetype)
