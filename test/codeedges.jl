@@ -349,7 +349,7 @@ module ModSelective end
     edges = CodeEdges(ModEval, src)
     lr = lines_required(GlobalRef(ModEval, :revise538), src, edges)
     selective_eval_fromstart!(Frame(ModEval, src), lr, #=istoplevel=#true)
-    @test isdefined(ModEval, :revise538) && length(methods(ModEval.revise538, (Float32,))) == 1
+    @test isdefined(ModEval, :revise538) && isempty(methods(ModEval.revise538)) # function is defined, method is not
 
     # https://github.com/timholy/Revise.jl/issues/599
     thk = Meta.lower(Main, quote

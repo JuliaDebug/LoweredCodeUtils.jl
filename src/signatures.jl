@@ -24,9 +24,9 @@ function signature(sigsv::SimpleVector)
 end
 
 """
-    sigt, lastpc = signature([interp::Interpreter=RecursiveInterpreter()], frame::Frame, pc::Int)
+    (mt, sigt), lastpc = signature([interp::Interpreter=RecursiveInterpreter()], frame::Frame, pc::Int)
 
-Compute the signature-type `sigt` of a method whose definition in `frame` starts at `pc`.
+Compute the method table `mt` and signature-type `sigt` of a method whose definition in `frame` starts at `pc`.
 Generally, `pc` should point to the `Expr(:method, methname)` statement, in which case
 `lastpc` is the final statement number in `frame` that is part of the signature
 (i.e, the line above the 3-argument `:method` expression).
@@ -34,7 +34,7 @@ Alternatively, `pc` can point to the 3-argument `:method` expression,
 as long as all the relevant SSAValues have been assigned.
 In this case, `lastpc == pc`.
 
-If no 3-argument `:method` expression is found, `sigt` will be `nothing`.
+If no 3-argument `:method` expression is found, `nothing` will be returned in place of `(mt, sigt)`.
 """
 function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::Int)
     mod = moduleof(frame)
@@ -52,9 +52,10 @@ function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::I
         stmt = pc_expr(frame, pc)
     end
     isa(stmt, Expr) || return nothing, pc
+    mt = extract_method_table(frame, stmt)
     sigsv = lookup(interp, frame, stmt.args[2])::SimpleVector
     sigt = signature(sigsv)
-    return sigt, lastpc
+    return MethodInfoKey(mt, sigt), lastpc
 end
 signature(interp::Interpreter, frame::Frame, pc::Int) = signature(interp, frame, pc_expr(frame, pc), pc)
 signature(frame::Frame, pc::Int) = signature(RecursiveInterpreter(), frame, pc)
@@ -187,7 +188,9 @@ function identify_framemethod_calls(frame::Frame)
             end
             msrc = stmt.args[3]
             if msrc isa CodeInfo
-                key = key::Union{GlobalRef,Bool,Nothing}
+                # XXX: Properly support interpolated `Core.MethodTable`. This will require using
+                # `stmt.args[2]` instead of `stmt.args[1]` to identify the parent function.
+                isa(key, Union{GlobalRef,Bool,Nothing}) || continue
                 for (j, mstmt) in enumerate(msrc.code)
                     isa(mstmt, Expr) || continue
                     jj = j
@@ -444,9 +447,9 @@ function get_running_name(interp::Interpreter, frame::Frame, pc::Int, name::Glob
         pctop -= 1
         stmt = pc_expr(frame, pctop)
     end   # end fix
-    sigtparent, lastpcparent = signature(interp, frame, pctop)
+    (mt, sigtparent), lastpcparent = signature(interp, frame, pctop)
     sigtparent === nothing && return name, pc, lastpcparent
-    methparent = whichtt(sigtparent)
+    methparent = whichtt(sigtparent, mt)
     methparent === nothing && return name, pc, lastpcparent  # caller isn't defined, no correction is needed
     if isgen
         cname = GlobalRef(moduleof(frame), nameof(methparent.generator.gen))
@@ -515,8 +518,8 @@ end
 """
     ret = methoddef!([interp::Interpreter=RecursiveInterpreter()], signatures, frame; define=true)
 
-Compute the signature of a method definition. `frame.pc` should point to a
-`:method` expression. Upon exit, the new signature will be added to `signatures`.
+Compute the method table/signature pair of a method definition. `frame.pc` should point to a
+`:method` expression. Upon exit, the new method table/signature pair will be added to `signatures`.
 
 There are several possible return values:
 
@@ -535,27 +538,27 @@ occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
 """
-function methoddef!(interp::Interpreter, signatures, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
+function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
     framecode, pcin = frame.framecode, pc
     if ismethod3(stmt)
         pc3 = pc
         arg1 = stmt.args[1]
-        sigt, pc = signature(interp, frame, stmt, pc)
-        meth = whichtt(sigt)
+        (mt, sigt), pc = signature(interp, frame, stmt, pc)
+        meth = whichtt(sigt, mt)
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
             pc = define ? step_expr!(interp, frame, stmt, true) : next_or_nothing!(interp, frame)
         elseif define
             pc = step_expr!(interp, frame, stmt, true)
-            meth = whichtt(sigt)
+            meth = whichtt(sigt, mt)
         end
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
-            push!(signatures, meth.sig)
+            push!(signatures, mt => meth.sig)
         else
-            if arg1 === false || arg1 === nothing
+            if arg1 === false || arg1 === nothing || isa(mt, MethodTable)
                 # If it's anonymous and not defined, define it
                 pc = step_expr!(interp, frame, stmt, true)
-                meth = whichtt(sigt)
-                isa(meth, Method) && push!(signatures, meth.sig)
+                meth = whichtt(sigt, mt)
+                isa(meth, Method) && push!(signatures, mt => meth.sig)
                 return pc, pc3
             else
                 # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
@@ -596,7 +599,7 @@ function methoddef!(interp::Interpreter, signatures, frame::Frame, @nospecialize
     end
     found || return nothing
     while true  # methods containing inner methods may need multiple trips through this loop
-        sigt, pc = signature(interp, frame, stmt, pc)
+        (mt, sigt), pc = signature(interp, frame, stmt, pc)
         stmt = pc_expr(frame, pc)
         while !isexpr(stmt, :method, 3)
             pc = next_or_nothing(interp, frame, pc)  # this should not check define, we've probably already done this once
@@ -611,15 +614,15 @@ function methoddef!(interp::Interpreter, signatures, frame::Frame, @nospecialize
         # signature of the active method. So let's get the active signature.
         frame.pc = pc
         pc = define ? step_expr!(interp, frame, stmt, true) : next_or_nothing!(interp, frame)
-        meth = whichtt(sigt)
-        isa(meth, Method) && push!(signatures, meth.sig) # inner methods are not visible
+        meth = whichtt(sigt, mt)
+        isa(meth, Method) && push!(signatures, mt => meth.sig) # inner methods are not visible
         name === name3 && return pc, pc3     # if this was an inner method we should keep going
         stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
     end
 end
-methoddef!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=true) =
+methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
     methoddef!(interp, signatures, frame, pc_expr(frame, pc), pc; define)
-function methoddef!(interp::Interpreter, signatures, frame::Frame; define::Bool=true)
+function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true)
     pc = frame.pc
     stmt = pc_expr(frame, pc)
     if !ismethod(stmt)
@@ -628,27 +631,27 @@ function methoddef!(interp::Interpreter, signatures, frame::Frame; define::Bool=
     pc === nothing && error("pc at end of frame without finding a method")
     methoddef!(interp, signatures, frame, pc; define)
 end
-methoddef!(signatures, frame::Frame, pc::Int; define::Bool=true) =
+methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
     methoddef!(RecursiveInterpreter(), signatures, frame, pc_expr(frame, pc), pc; define)
-methoddef!(signatures, frame::Frame; define::Bool=true) =
+methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddef!(RecursiveInterpreter(), signatures, frame; define)
 
-function methoddefs!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=true)
+function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true)
     ret = methoddef!(interp, signatures, frame, pc; define)
     pc = ret === nothing ? ret : ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
-function methoddefs!(interp::Interpreter, signatures, frame::Frame; define::Bool=true)
+function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true)
     ret = methoddef!(interp, signatures, frame; define)
     pc = ret === nothing ? ret : ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
-methoddefs!(signatures, frame::Frame, pc::Int; define::Bool=true) =
+methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
     methoddefs!(RecursiveInterpreter(), signatures, frame, pc; define)
-methoddefs!(signatures, frame::Frame; define::Bool=true) =
+methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddefs!(RecursiveInterpreter(), signatures, frame; define)
 
-function _methoddefs!(interp::Interpreter, signatures, frame::Frame, pc::Int; define::Bool=define)
+function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=define)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
