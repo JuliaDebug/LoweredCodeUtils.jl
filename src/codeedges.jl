@@ -203,10 +203,12 @@ function get_lhs_rhs(@nospecialize stmt)
     if isexpr(stmt, :(=))
         return Pair{Any,Any}(stmt.args[1], stmt.args[2])
     elseif isexpr(stmt, :const) && length(stmt.args) == 2
+        # TODO: remove lowered :const when Julia min compat >= 1.13
         return Pair{Any,Any}(stmt.args[1], stmt.args[2])
     elseif isexpr(stmt, :call) && length(stmt.args) == 4
         f = stmt.args[1]
-        if is_global_ref_egal(f, :setglobal!, Core.setglobal!)
+        # TODO: remove isdefined when Julia min compat >= 1.13
+        if is_global_ref_egal(f, :setglobal!, Core.setglobal!) || @static isdefined(Core, :declare_const) && is_global_ref_egal(f, :declare_const,  Core.declare_const)
             mod = stmt.args[2]
             mod isa Module || return nothing
             name = stmt.args[3]
