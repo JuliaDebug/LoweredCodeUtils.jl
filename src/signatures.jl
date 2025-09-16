@@ -302,10 +302,7 @@ function set_to_running_name!(interp::Interpreter, replacements::Dict{GlobalRef,
     replacements[callee] = cname
     mi = methodinfos[cname] = methodinfos[callee]
     src = frame.framecode.src
-    replacename!(@view(src.code[mi.start:mi.stop]), callee=>cname) # the method itself
-    for r in mi.refs                                               # the references
-        replacename!((src.code[r])::Expr, callee=>cname)
-    end
+    replacename!(src, callee=>cname) # the method itself
     return replacements
 end
 
@@ -398,7 +395,7 @@ end
 """
     replacename!(stmts, oldname=>newname)
 
-Replace a Symbol `oldname` with `newname` in `stmts`.
+Replace a Symbol `oldname` with GlobalRef `newname` in `stmts`.
 """
 function replacename!(ex::Expr, pr)
     replacename!(ex.args, pr)
@@ -417,6 +414,8 @@ function replacename!(args::AbstractVector, pr)
             replacename!(a.code, pr)
         elseif isa(a, QuoteNode) && a.value === oldname
             args[i] = QuoteNode(newname)
+        elseif isa(a, QuoteNode) && a.value === oldname.name
+            args[i] = QuoteNode(newname.name)
         elseif isa(a, Vector{Any})
             replacename!(a, pr)
         elseif isa(a, Core.ReturnNode) && isdefined(a, :val) && a.val isa Expr
@@ -424,7 +423,7 @@ function replacename!(args::AbstractVector, pr)
             replacename!(a.val::Expr, pr)
         elseif a === oldname
             args[i] = newname
-        elseif isa(a, Symbol) && a == oldname.name
+        elseif a == oldname.name
             args[i] = newname.name
         end
     end
