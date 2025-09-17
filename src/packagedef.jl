@@ -2,7 +2,7 @@ Base.Experimental.@optlevel 1
 
 using Core: SimpleVector, MethodTable
 using Core.IR: CodeInfo, GotoIfNot, GotoNode, IR, MethodInstance, ReturnNode
-@static if isdefinedglobal(Core.IR, :EnterNode)
+@static if isdefined(Core.IR, :EnterNode)
     using Core.IR: EnterNode
 end
 using .CC:
@@ -10,7 +10,7 @@ using .CC:
     compute_basic_blocks, construct_domtree, construct_postdomtree,
     nearest_common_dominator, postdominates
 
-@static if isdefinedglobal(CC, :IRShow)
+@static if isdefined(CC, :IRShow)
     using .CC: IRShow
 else
     using Base: IRShow
