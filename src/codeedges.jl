@@ -345,7 +345,7 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
                     s = stmt.args[3]
                     strong = length(stmt.args) >= 4 ? stmt.args[4] === true : false
                     if strong && m isa Module && s isa QuoteNode && s.value isa Symbol
-                        a = GlobalRef(m, s.value)
+                        a = GlobalRef(m, s.value::Symbol)
                         namestore = get!(Links, cl.namepreds, a) # TODO should this information be tracked in the separate `cl.namedecls` store?
                         push!(namestore, targetid)
                         if targetid isa SSAValue
