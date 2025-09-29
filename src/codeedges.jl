@@ -339,6 +339,21 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
                     # Avoid putting named callees on the namestore
                     arng = 2:length(stmt.args)
                 end
+                if f isa GlobalRef && f == GlobalRef(Core, :declare_global) && 3 <= length(stmt.args) <= 5
+                    # Core.declare_global(module::Module, name::Symbol, strong::Bool=false, [ty::Type])
+                    m = stmt.args[2]
+                    s = stmt.args[3]
+                    strong = length(stmt.args) >= 4 ? stmt.args[4] === true : false
+                    if strong && m isa Module && s isa QuoteNode && s.value isa Symbol
+                        a = GlobalRef(m, s.value::Symbol)
+                        namestore = get!(Links, cl.namepreds, a) # TODO should this information be tracked in the separate `cl.namedecls` store?
+                        push!(namestore, targetid)
+                        if targetid isa SSAValue
+                            push!(namestore, SSAValue(targetid.id+1)) # +1 for :latestworld
+                        end
+                    end
+                    arng = 4:length(stmt.args)
+                end
             end
             for i in arng
                 add_links!(target, stmt.args[i], cl)
