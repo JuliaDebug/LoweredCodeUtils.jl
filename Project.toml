@@ -9,7 +9,7 @@ Compiler = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
 JuliaInterpreter = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
 
 [compat]
-CodeTracking = "2"
+CodeTracking = "3"
 Compiler = "0.1"
 JuliaInterpreter = "0.10"
 julia = "1.10"
