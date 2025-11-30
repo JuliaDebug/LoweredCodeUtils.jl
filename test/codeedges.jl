@@ -217,6 +217,25 @@ module ModSelective end
     @test ModSelective.k11 == 0
     @test 3 <= ModSelective.s11 <= 15
 
+    # Final block is not a `return`: Need to use `controller::SelectiveEvalController` explicitly
+    ex = quote
+        x = 1
+        yy = 7
+        @label loop
+        x += 1
+        x < 5 || return yy
+        @goto loop
+    end
+    frame = Frame(ModSelective, ex)
+    src = frame.framecode.src
+    edges = CodeEdges(ModSelective, src)
+    info = SelectiveEvalInfo()
+    isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges, info)
+    interp = LoweredCodeUtils.SelectiveInterpreter(LoweredCodeUtils.RecursiveInterpreter(), isrequired, info)
+    JuliaInterpreter.finish_and_return!(interp, frame, true)
+    @test ModSelective.x == 5
+    @test !isdefined(ModSelective, :yy)
+
     # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
     frame = Frame(ModSelective, ex)
