@@ -331,6 +331,7 @@ function _rename_framemethods!(interp::Interpreter, frame::Frame,
             set_to_running_name!(interp, replacements, frame, methodinfos, selfcalls[idx], calledby, callee, caller)
         catch err
             @warn "skipping callee $callee (called by $caller) due to $err"
+            # showerror(stderr, err, stacktrace(catch_backtrace()))
         end
     end
     for sc in selfcalls
