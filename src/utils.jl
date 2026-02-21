@@ -156,8 +156,10 @@ end
 function is_declare_global(@nospecialize(stmt))
     isexpr(stmt, :call) || return false
     f = stmt.args[1]
-    is_global_ref(f, Core, :declare_global) && return true
-    is_quotenode_egal(f, Core.declare_global) && return true
+    @static if isdefined(Core, :declare_global)
+        is_global_ref(f, Core, :declare_global) && return true
+        is_quotenode_egal(f, Core.declare_global) && return true
+    end
     return false
 end
 
