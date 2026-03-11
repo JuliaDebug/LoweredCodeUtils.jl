@@ -15,6 +15,7 @@ function hastrackedexpr(@nospecialize(stmt))
             haseval = f === :eval || (callee_matches(f, Base, :getproperty) && is_quotenode(stmt.args[2], :eval))
             callee_matches(f, Core, :_typebody!) && return true, haseval
             callee_matches(f, Core, :_setsuper!) && return true, haseval
+            LoweredCodeUtils.is_define_method_ref(f) && return true, haseval
             f === :include && return true, haseval
         elseif stmt.head === :thunk
             any(s->any(hastrackedexpr(s)), stmt.args[1].code) && return true, haseval
