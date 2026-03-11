@@ -243,24 +243,25 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             icl = CodeLinks(cl.thismod, arg1)
             add_inner!(cl, icl, i)
             continue
-        elseif isexpr(stmt, :method)
-            if length(stmt.args) === 1
+        elseif isexpr(stmt, :method) || is_define_method_call_2arg(stmt) || is_define_method_call_4arg(stmt)
+            if ismethod1(stmt)
                 # A function with no methods was defined. Associate its new binding to it.
-                name = stmt.args[1]
-                if isa(name, Symbol)
-                    name = GlobalRef(cl.thismod, name)
+                name = method_name(stmt)
+                if isa(name, Symbol) || isa(name, QuoteNode)
+                    name = isa(name, QuoteNode) ? name.value : name
+                    mmod = method_module(stmt)
+                    name = GlobalRef(mmod !== nothing ? mmod : cl.thismod, name::Symbol)
                 end
-                if !isa(name, GlobalRef)
-                    error("name ", typeof(name), " not recognized")
+                if isa(name, GlobalRef)
+                    assign = get!(Vector{Int}, cl.nameassigns, name)
+                    push!(assign, i)
+                    targetstore = get!(Links, cl.namepreds, name)
+                    target = P(name, targetstore)
+                    add_links!(target, stmt, cl)
                 end
-                assign = get!(Vector{Int}, cl.nameassigns, name)
-                push!(assign, i)
-                targetstore = get!(Links, cl.namepreds, name)
-                target = P(name, targetstore)
-                add_links!(target, stmt, cl)
-            elseif length(stmt.args) === 3 && (arg3 = stmt.args[3]; arg3 isa CodeInfo) # method definition
+            elseif ismethod3(stmt) && (mbody = method_body(stmt); mbody isa CodeInfo) # method definition
                 # A method was defined for an existing function.
-                icl = CodeLinks(cl.thismod, arg3)
+                icl = CodeLinks(cl.thismod, mbody)
                 add_inner!(cl, icl, i)
             end
             rhs = stmt
@@ -957,7 +958,7 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
                         for s in var.succs
                             s ∈ norequire && continue
                             stmt2 = stmts[s]
-                            if isexpr(stmt2, :method) && (fname = (stmt2::Expr).args[1]; fname === false || fname === nothing)
+                            if ismethod(stmt2) && (fname = method_name(stmt2::Expr); fname === false || fname === nothing)
                                 isrequired[s] = true
                             end
                         end
@@ -973,7 +974,7 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
             while i <= length(stmts) && !ismethod3(stmts[i])
                 i += 1
             end
-            if i <= length(stmts) && (stmts[i]::Expr).args[1] == false
+            if i <= length(stmts) && method_name(stmts[i]::Expr) == false
                 tpreds = terminal_preds(i, edges)
                 if minimum(tpreds) == idx && i ∉ norequire
                     changed |= !isrequired[i]
