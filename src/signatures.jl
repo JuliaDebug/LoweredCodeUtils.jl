@@ -242,7 +242,9 @@ end
 # try to normalize `def` to `GlobalRef` representation
 function normalize_defsig(@nospecialize(def), mod::Module)
     if def isa QuoteNode
-        def = nameof(def.value)
+        # A quoted Symbol (e.g. the callee of `:foo(x)`) is already a name; only
+        # other wrapped values (functions, types, modules) need `nameof`.
+        def = def.value isa Symbol ? def.value : nameof(def.value)
     end
     if def isa Symbol
         def = GlobalRef(mod, def)
