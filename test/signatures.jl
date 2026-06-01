@@ -538,4 +538,19 @@ end
     LoweredCodeUtils.identify_framemethod_calls(frame) # make sure this does not throw
 end
 
+@testset "normalize_defsig with a quoted Symbol callee (issue Revise#914)" begin
+    # A quoted Symbol is already a name and must not be passed to `nameof`.
+    @test LoweredCodeUtils.normalize_defsig(QuoteNode(:length), Main) === GlobalRef(Main, :length)
+
+    # A method body containing a call to a quoted symbol, e.g. `:length(list)`,
+    # lowers to a `:call` whose callee is `QuoteNode(:length)`. Walking it must
+    # not throw.
+    ex = :(function f_rvs914(list)
+               m = zeros(3, 3)
+               m[:, :length(list)]
+           end)
+    frame = Frame(Main, ex)
+    @test LoweredCodeUtils.identify_framemethod_calls(frame) isa Any  # must not throw
+end
+
 end # module signatures
