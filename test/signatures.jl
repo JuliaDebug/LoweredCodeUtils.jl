@@ -21,6 +21,11 @@ const LT{T} = Union{LVec{<:Any, T}, T}
 const FloatingTypes = Union{Float32, Float64}
 end
 
+# Stuff for https://github.com/timholy/Revise.jl/issues/706
+module Lowering706
+ran = Ref(0)
+end
+
 bodymethtest0(x) = 0
 function bodymethtest0(x)
     y = 2x
@@ -163,6 +168,23 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     ret = methoddef!(empty!(signatures), frame; define=true)
     @test !isempty(signatures)
     @test isa(ret, NTuple{2,Int})
+
+    # A bare `function foo end` only forward-declares `foo`; when its real definition is
+    # separated from it by unrelated top-level code, extracting signatures must not march
+    # through and execute that intervening code (https://github.com/timholy/Revise.jl/issues/706).
+    ex = quote
+        function fwd706 end
+        ran[] += 1            # unrelated top-level code that must not run while collecting signatures
+        unrelated706() = 1    # an unrelated, differently-named method
+        fwd706() = 2          # the real definition, after the intervening code
+    end
+    Core.eval(Lowering706, ex)   # mimic an already-loaded module, as when re-extracting signatures
+    Lowering706.ran[] = 0
+    frame = Frame(Lowering706, ex)
+    rename_framemethods!(frame)
+    ret = methoddef!(empty!(signatures), frame; define=false)
+    @test ret === nothing
+    @test Lowering706.ran[] == 0
 
     # Anonymous functions in method signatures
     ex = :(max_values(T::Union{map(X -> Type{X}, Base.BitIntegerSmall_types)...}) = 1 << (8*sizeof(T)))  # base/abstractset.jl
