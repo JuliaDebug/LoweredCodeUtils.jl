@@ -188,16 +188,16 @@ struct CFGShortCut
 end
 
 """
-    info::SelectiveEvalInfo
+    controller::SelectiveEvalController
 
 When this object is passed as the `recurse` argument of `selective_eval!`,
 the selective execution is adjusted as follows:
 
 - **Implicit return**: In Julia's IR representation (`CodeInfo`), the final block does not
-  necessarily return and may `goto` another block. And if the `return` statement is not
-  included in the slice in such cases, it is necessary to terminate `selective_eval!` when
-  execution reaches such implicit return statements. `info.implicit_returns` records
-  the PCs of such return statements, and `selective_eval!` will return when reaching those statements.
+  necessarily return and may `goto` another block. In such cases the actual `return` is an
+  explicit statement earlier in the code, and if the slice does not include it,
+  `selective_eval!` must still terminate when execution reaches it. `controller.implicit_returns`
+  records the PCs of such `return` statements, and `selective_eval!` will return when reaching them.
 
 - **CFG short-cut**: When the successors of a conditional branch are inactive, and it is
   safe to move the program counter from the conditional branch to the nearest common
@@ -208,31 +208,32 @@ the selective execution is adjusted as follows:
   blocks), it does not necessarily lead to the nearest common post-dominator block.
 
 These adjustments are necessary for performing selective execution correctly.
-[`lines_required`](@ref) or [`lines_required!`](@ref) will update the `SelectiveInterpreter`
+[`lines_required`](@ref) or [`lines_required!`](@ref) will update the `SelectiveEvalController`
 passed as an argument to be appropriate for the program slice generated.
 """
-struct SelectiveEvalInfo
+struct SelectiveEvalController
     implicit_returns::BitSet    # pc where selective execution should terminate even if they're inactive
     shortcuts::Vector{CFGShortCut}
 end
-SelectiveEvalInfo() = SelectiveEvalInfo(BitSet(), CFGShortCut[])
+SelectiveEvalController() = SelectiveEvalController(BitSet(), CFGShortCut[])
 
 """
     struct SelectiveInterpreter{S<:Interpreter,T<:AbstractVector{Bool}} <: Interpreter
         inner::S
         isrequired::T
+        controller::SelectiveEvalController
     end
 
 An `JuliaInterpreter.Interpreter` that executes only the statements marked `true` in `isrequired`.
-Note that this inforeter does not recurse into callee frames.
-That is, when `JuliaInterpreter.finish!(info::SelectiveEvalInfo, frame, ...)` is
-performed, the `frame` will be executed selectively according to `info.isrequired`, but
-any callee frames within it will be executed by `info.inner::Interpreter`, not by `info`.
+Note that this interpreter does not recurse into callee frames.
+That is, when `JuliaInterpreter.finish!(interp::SelectiveInterpreter, frame, ...)` is
+performed, the `frame` will be executed selectively according to `interp.isrequired`, but
+any callee frames within it will be executed by `interp.inner::Interpreter`, not by `interp`.
 """
 struct SelectiveInterpreter{S<:Interpreter,T<:AbstractVector{Bool}} <: Interpreter
     inner::S
     isrequired::T
-    info::SelectiveEvalInfo
+    controller::SelectiveEvalController
 end
 
 function namedkeys(cl::CodeLinks)
@@ -659,8 +660,8 @@ function terminal_preds!(s, j, edges, covered)  # can't be an inner function bec
 end
 
 """
-    isrequired = lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges, [info::SelectiveEvalInfo])
-    isrequired = lines_required(idx::Int,       src::CodeInfo, edges::CodeEdges, [info::SelectiveEvalInfo])
+    isrequired = lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges, [controller::SelectiveEvalController])
+    isrequired = lines_required(idx::Int,       src::CodeInfo, edges::CodeEdges, [controller::SelectiveEvalController])
 
 Determine which lines might need to be executed to evaluate `obj` or the statement indexed by `idx`.
 If `isrequired[i]` is `false`, the `i`th statement is *not* required.
@@ -670,25 +671,25 @@ will end up skipping a subset of such statements, perhaps while repeating others
 See also [`lines_required!`](@ref) and [`selective_eval!`](@ref).
 """
 function lines_required(obj::GlobalRef, src::CodeInfo, edges::CodeEdges,
-                        info::SelectiveEvalInfo=SelectiveEvalInfo();
+                        controller::SelectiveEvalController=SelectiveEvalController();
                         kwargs...)
     isrequired = falses(length(edges.preds))
     objs = Set{GlobalRef}([obj])
-    return lines_required!(isrequired, objs, src, edges, info; kwargs...)
+    return lines_required!(isrequired, objs, src, edges, controller; kwargs...)
 end
 
 function lines_required(idx::Int, src::CodeInfo, edges::CodeEdges,
-                        info::SelectiveEvalInfo=SelectiveEvalInfo();
+                        controller::SelectiveEvalController=SelectiveEvalController();
                         kwargs...)
     isrequired = falses(length(edges.preds))
     isrequired[idx] = true
     objs = Set{GlobalRef}()
-    return lines_required!(isrequired, objs, src, edges, info; kwargs...)
+    return lines_required!(isrequired, objs, src, edges, controller; kwargs...)
 end
 
 """
     lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges,
-                    [info::SelectiveEvalInfo];
+                    [controller::SelectiveEvalController];
                     norequire = ())
 
 Like `lines_required`, but where `isrequired[idx]` has already been set to `true` for all statements
@@ -701,10 +702,10 @@ For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src, edges
 extracting method signatures and not evaluating new definitions.
 """
 function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges,
-                         info::SelectiveEvalInfo=SelectiveEvalInfo();
+                         controller::SelectiveEvalController=SelectiveEvalController();
                          kwargs...)
     objs = Set{GlobalRef}()
-    return lines_required!(isrequired, objs, src, edges, info; kwargs...)
+    return lines_required!(isrequired, objs, src, edges, controller; kwargs...)
 end
 
 function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
@@ -725,7 +726,7 @@ function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
 end
 
 function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges,
-                         info::SelectiveEvalInfo=SelectiveEvalInfo();
+                         controller::SelectiveEvalController=SelectiveEvalController();
                          norequire = ())
     # Mark any requested objects (their lines of assignment)
     objs = add_requests!(isrequired, objs, edges, norequire)
@@ -761,10 +762,10 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     end
 
     # now mark the active goto nodes
-    add_active_gotos!(isrequired, src, cfg, postdomtree, info)
+    add_active_gotos!(isrequired, src, cfg, postdomtree, controller)
 
     # check if there are any implicit return blocks
-    record_implcit_return!(info, isrequired, cfg)
+    record_implicit_return!(controller, isrequired, cfg)
 
     return isrequired
 end
@@ -929,8 +930,8 @@ function reachable_blocks(cfg, from_bb::Int, to_bb::Int)
     return visited
 end
 
-function add_active_gotos!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, info::SelectiveEvalInfo)
-    dead_blocks = compute_dead_blocks!(isrequired, src, cfg, postdomtree, info)
+function add_active_gotos!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, controller::SelectiveEvalController)
+    dead_blocks = compute_dead_blocks!(isrequired, src, cfg, postdomtree, controller)
     changed = false
     for bbidx = 1:length(cfg.blocks)
         if bbidx ∉ dead_blocks
@@ -948,7 +949,7 @@ function add_active_gotos!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, inf
 end
 
 # find dead blocks using the same approach as `add_control_flow!`, for the converged `isrequired`
-function compute_dead_blocks!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, info::SelectiveEvalInfo)
+function compute_dead_blocks!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, controller::SelectiveEvalController)
     dead_blocks = BitSet()
     for bbidx = 1:length(cfg.blocks)
         bb = cfg.blocks[bbidx]
@@ -972,7 +973,7 @@ function compute_dead_blocks!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, 
                     if postdominator ≠ 0
                         postdominator_bb = cfg.blocks[postdominator]
                         postdominator_entryidx = postdominator_bb.stmts[begin]
-                        push!(info.shortcuts, CFGShortCut(termidx, postdominator_entryidx))
+                        push!(controller.shortcuts, CFGShortCut(termidx, postdominator_entryidx))
                     end
                 end
             end
@@ -981,13 +982,13 @@ function compute_dead_blocks!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, 
     return dead_blocks
 end
 
-function record_implcit_return!(info::SelectiveEvalInfo, isrequired, cfg::CFG)
+function record_implicit_return!(controller::SelectiveEvalController, isrequired, cfg::CFG)
     for bbidx = 1:length(cfg.blocks)
         bb = cfg.blocks[bbidx]
         if isempty(bb.succs)
             i = findfirst(idx::Int->!isrequired[idx], bb.stmts)
             if !isnothing(i)
-                push!(info.implicit_returns, bb.stmts[i])
+                push!(controller.implicit_returns, bb.stmts[i])
             end
         end
     end
@@ -1118,10 +1119,10 @@ end
 
 function JuliaInterpreter.step_expr!(interp::SelectiveInterpreter, frame::Frame, istoplevel::Bool)
     pc = frame.pc
-    if pc in interp.info.implicit_returns
+    if pc in interp.controller.implicit_returns
         return nothing
     elseif pc_expr(frame) isa GotoIfNot
-        for shortcut in interp.info.shortcuts
+        for shortcut in interp.controller.shortcuts
             if shortcut.from == pc
                 return frame.pc = shortcut.to
             end
@@ -1159,21 +1160,26 @@ See [`selective_eval_fromstart!`](@ref) to have that performed automatically.
 
 `isrequired` pertains only to `frame` itself, not any of its callees.
 
-When `interp.info::SelectiveEvalInfo` is configured, the selective evaluation execution
-becomes fully correct. Conversely, with the default `finish_and_return!`, selective
-evaluation may not be necessarily correct for all possible Julia code (see
-https://github.com/JuliaDebug/LoweredCodeUtils.jl/pull/99 for more details).
+By default `selective_eval!` runs with an empty [`SelectiveEvalController`](@ref), which
+reproduces the historical behavior. That is correct for most top-level code, but not for
+every possible Julia program: when the slice omits a `return` reached by fall-through, or
+omits a branch whose dead region does not simply fall through to its post-dominator, the
+interpreter can execute the wrong statements (see
+https://github.com/JuliaDebug/LoweredCodeUtils.jl/pull/99 for details). For full correctness,
+pass a [`SelectiveEvalController`](@ref) to [`lines_required`](@ref)/[`lines_required!`](@ref)
+and reuse that same controller, together with the `isrequired` it produced, to construct a
+[`SelectiveInterpreter`](@ref) that you run with `JuliaInterpreter.finish_and_return!`.
+Drawing both from the same call is what keeps `isrequired` and the controller synchronized.
 
-Ensure that the specified `interp` is properly synchronized with `isrequired`.
-Additionally note that, at present, it is not possible to recurse the `interp`.
-In other words, there is no system in place for inforocedural selective evaluation.
+Note that the interpreter does not recurse into callees, so there is currently no
+interprocedural selective evaluation.
 
 This will return either a `BreakpointRef`, the value obtained from the last executed statement
 (if stored to `frame.framedata.ssavlues`), or `nothing`.
 Typically, assignment to a variable binding does not result in an ssa store by JuliaInterpreter.
 """
 function selective_eval!(interp::Interpreter, frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
-    interp = SelectiveInterpreter(interp, isrequired, SelectiveEvalInfo())
+    interp = SelectiveInterpreter(interp, isrequired, SelectiveEvalController())
     JuliaInterpreter.finish_and_return!(interp, frame, istoplevel)
 end
 selective_eval!(args...) = selective_eval!(RecursiveInterpreter(), args...)

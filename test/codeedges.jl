@@ -235,9 +235,9 @@ module ModSelective end
     frame = Frame(ModSelective, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModSelective, src)
-    info = SelectiveEvalInfo()
-    isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges, info)
-    interp = LoweredCodeUtils.SelectiveInterpreter(LoweredCodeUtils.RecursiveInterpreter(), isrequired, info)
+    controller = SelectiveEvalController()
+    isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges, controller)
+    interp = LoweredCodeUtils.SelectiveInterpreter(LoweredCodeUtils.RecursiveInterpreter(), isrequired, controller)
     JuliaInterpreter.finish_and_return!(interp, frame, true)
     @test ModSelective.x == 5
     @test !isdefined(ModSelective, :yy)
