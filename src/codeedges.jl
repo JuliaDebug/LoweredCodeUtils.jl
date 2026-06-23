@@ -193,11 +193,11 @@ end
 When this object is passed as the `recurse` argument of `selective_eval!`,
 the selective execution is adjusted as follows:
 
-- **Implicit return**: In Julia's IR representation (`CodeInfo`), the final block does not
-  necessarily return and may `goto` another block. In such cases the actual `return` is an
-  explicit statement earlier in the code, and if the slice does not include it,
-  `selective_eval!` must still terminate when execution reaches it. `controller.implicit_returns`
-  records the PCs of such `return` statements, and `selective_eval!` will return when reaching them.
+- **Termination point**: In Julia's IR representation (`CodeInfo`), a terminal
+  basic block may contain a statement that is outside the slice but should still
+  terminate selective execution when reached. `controller.termination_points`
+  records the PCs of such statements, and `selective_eval!` will return when
+  reaching them.
 
 - **CFG short-cut**: When the successors of a conditional branch are inactive, and it is
   safe to move the program counter from the conditional branch to the nearest common
@@ -212,7 +212,7 @@ These adjustments are necessary for performing selective execution correctly.
 passed as an argument to be appropriate for the program slice generated.
 """
 struct SelectiveEvalController
-    implicit_returns::BitSet    # pc where selective execution should terminate even if they're inactive
+    termination_points::BitSet # inactive PCs where selective execution terminates
     shortcuts::Vector{CFGShortCut}
 end
 SelectiveEvalController() = SelectiveEvalController(BitSet(), CFGShortCut[])
@@ -764,8 +764,8 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     # now mark the active goto nodes
     add_active_gotos!(isrequired, src, cfg, postdomtree, controller)
 
-    # check if there are any implicit return blocks
-    record_implicit_return!(controller, isrequired, cfg)
+    # check if there are any termination points
+    record_termination_points!(controller, isrequired, cfg)
 
     return isrequired
 end
@@ -982,13 +982,13 @@ function compute_dead_blocks!(isrequired, src::CodeInfo, cfg::CFG, postdomtree, 
     return dead_blocks
 end
 
-function record_implicit_return!(controller::SelectiveEvalController, isrequired, cfg::CFG)
+function record_termination_points!(controller::SelectiveEvalController, isrequired, cfg::CFG)
     for bbidx = 1:length(cfg.blocks)
         bb = cfg.blocks[bbidx]
         if isempty(bb.succs)
             i = findfirst(idx::Int->!isrequired[idx], bb.stmts)
             if !isnothing(i)
-                push!(controller.implicit_returns, bb.stmts[i])
+                push!(controller.termination_points, bb.stmts[i])
             end
         end
     end
@@ -1119,7 +1119,7 @@ end
 
 function JuliaInterpreter.step_expr!(interp::SelectiveInterpreter, frame::Frame, istoplevel::Bool)
     pc = frame.pc
-    if pc in interp.controller.implicit_returns
+    if pc in interp.controller.termination_points
         return nothing
     elseif pc_expr(frame) isa GotoIfNot
         for shortcut in interp.controller.shortcuts
