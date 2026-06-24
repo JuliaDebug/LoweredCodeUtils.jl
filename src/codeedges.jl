@@ -985,9 +985,10 @@ end
 function record_termination_points!(controller::SelectiveEvalController, isrequired, cfg::CFG)
     for bbidx = 1:length(cfg.blocks)
         bb = cfg.blocks[bbidx]
-        if isempty(bb.succs)
-            i = findfirst(idx::Int->!isrequired[idx], bb.stmts)
-            if !isnothing(i)
+        if isempty(bb.succs) && !isempty(bb.stmts)
+            last_required = findlast(idx::Int->isrequired[idx], bb.stmts)
+            i = isnothing(last_required) ? firstindex(bb.stmts) : last_required + 1
+            if i <= lastindex(bb.stmts)
                 push!(controller.termination_points, bb.stmts[i])
             end
         end
