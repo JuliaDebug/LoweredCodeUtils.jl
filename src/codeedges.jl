@@ -1152,6 +1152,7 @@ end
 
 """
     selective_eval!([interp::Interpreter=RecursiveInterpreter()], frame::Frame, isrequired::AbstractVector{Bool}, istoplevel=false)
+    selective_eval!([interp::Interpreter=RecursiveInterpreter()], frame::Frame, isrequired::AbstractVector{Bool}, controller::SelectiveEvalController, istoplevel=false)
 
 Execute the code in `frame` in the manner of `JuliaInterpreter.finish_and_return!`,
 but skipping all statements that are marked `false` in `isrequired`.
@@ -1168,9 +1169,9 @@ omits a branch whose dead region does not simply fall through to its post-domina
 interpreter can execute the wrong statements (see
 https://github.com/JuliaDebug/LoweredCodeUtils.jl/pull/99 for details). For full correctness,
 pass a [`SelectiveEvalController`](@ref) to [`lines_required`](@ref)/[`lines_required!`](@ref)
-and reuse that same controller, together with the `isrequired` it produced, to construct a
-[`SelectiveInterpreter`](@ref) that you run with `JuliaInterpreter.finish_and_return!`.
-Drawing both from the same call is what keeps `isrequired` and the controller synchronized.
+and reuse that same controller, together with the `isrequired` it produced, when calling
+`selective_eval!`. Drawing both from the same call is what keeps `isrequired` and the
+controller synchronized.
 
 Note that the interpreter does not recurse into callees, so there is currently no
 interprocedural selective evaluation.
@@ -1179,22 +1180,42 @@ This will return either a `BreakpointRef`, the value obtained from the last exec
 (if stored to `frame.framedata.ssavlues`), or `nothing`.
 Typically, assignment to a variable binding does not result in an ssa store by JuliaInterpreter.
 """
-function selective_eval!(interp::Interpreter, frame::Frame, isrequired::AbstractVector{Bool}, istoplevel::Bool=false)
-    interp = SelectiveInterpreter(interp, isrequired, SelectiveEvalController())
+function selective_eval!(
+        interp::Interpreter, frame::Frame, isrequired::AbstractVector{Bool},
+        controller::SelectiveEvalController,
+        istoplevel::Bool=false
+    )
+    interp = SelectiveInterpreter(interp, isrequired, controller)
     JuliaInterpreter.finish_and_return!(interp, frame, istoplevel)
+end
+function selective_eval!(
+        interp::Interpreter, frame::Frame, isrequired::AbstractVector{Bool},
+        istoplevel::Bool=false
+    )
+    return selective_eval!(interp, frame, isrequired, SelectiveEvalController(), istoplevel)
 end
 selective_eval!(args...) = selective_eval!(RecursiveInterpreter(), args...)
 
 """
     selective_eval_fromstart!([interp::Interpreter=RecursiveInterpreter()], frame, isrequired, istoplevel=false)
+    selective_eval_fromstart!([interp::Interpreter=RecursiveInterpreter()], frame, isrequired, controller::SelectiveEvalController, istoplevel=false)
 
 Like [`selective_eval!`](@ref), except it sets `frame.pc` to the first `true` statement in `isrequired`.
 """
-function selective_eval_fromstart!(interp::Interpreter, frame, isrequired, istoplevel::Bool=false)
+function selective_eval_fromstart!(
+        interp::Interpreter, frame, isrequired, controller::SelectiveEvalController,
+        istoplevel::Bool=false
+    )
     pc = findfirst(isrequired)
     pc === nothing && return nothing
     frame.pc = pc
-    return selective_eval!(interp, frame, isrequired, istoplevel)
+    return selective_eval!(interp, frame, isrequired, controller, istoplevel)
+end
+function selective_eval_fromstart!(
+        interp::Interpreter, frame, isrequired, istoplevel::Bool=false
+    )
+    return selective_eval_fromstart!(
+        interp, frame, isrequired, SelectiveEvalController(), istoplevel)
 end
 selective_eval_fromstart!(args...) = selective_eval_fromstart!(RecursiveInterpreter(), args...)
 

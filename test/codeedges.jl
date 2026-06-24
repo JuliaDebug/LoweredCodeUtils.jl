@@ -237,8 +237,8 @@ module ModSelective end
     edges = CodeEdges(ModSelective, src)
     controller = SelectiveEvalController()
     isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges, controller)
-    interp = LoweredCodeUtils.SelectiveInterpreter(LoweredCodeUtils.RecursiveInterpreter(), isrequired, controller)
-    JuliaInterpreter.finish_and_return!(interp, frame, true)
+    selective_eval_fromstart!(
+        LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
     @test ModSelective.x == 5
     @test !isdefined(ModSelective, :yy)
 
@@ -261,10 +261,8 @@ module ModSelective end
         targetidx = findlast(stmt -> Meta.isexpr(stmt, :call), src.code) # the second push!
         isrequired[targetidx] = true
         lines_required!(isrequired, (GlobalRef(mod, :branch_value),), src, edges, controller)
-        interp = LoweredCodeUtils.SelectiveInterpreter(
-            LoweredCodeUtils.RecursiveInterpreter(), isrequired, controller)
-        frame.pc = findfirst(isrequired)
-        JuliaInterpreter.finish_and_return!(interp, frame, true)
+        selective_eval_fromstart!(
+            LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
         @test @invokelatest(mod.branch_value) == 1
         @test @invokelatest(mod.hits) == [2]
     end
