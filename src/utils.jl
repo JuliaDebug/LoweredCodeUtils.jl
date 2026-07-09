@@ -85,7 +85,7 @@ end
 # define_method(mod, name_or_mt, sigdata, codeinfo) — 4-arg form defines a method
 function is_define_method_call_4arg(@nospecialize(stmt))
     isexpr(stmt, :call) || return false
-    length(stmt.args) >= 5 || return false
+    length(stmt.args) == 5 || return false
     return is_define_method_ref(stmt.args[1])
 end
 

@@ -23,6 +23,20 @@ function signature(sigsv::SimpleVector)
     return sig::Union{DataType,UnionAll}
 end
 
+function resolve_method_table(interp::Interpreter, frame::Frame, @nospecialize(arg))
+    value = try
+        lookup(interp, frame, arg)
+    catch
+        arg isa Expr || return nothing
+        try
+            Core.eval(moduleof(frame), arg)
+        catch
+            nothing
+        end
+    end
+    return value isa Core.MethodTable ? value : nothing
+end
+
 """
     (mt, sigt), lastpc = signature([interp::Interpreter=RecursiveInterpreter()], frame::Frame, pc::Int)
 
@@ -53,9 +67,7 @@ function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::I
     end
     isa(stmt, Expr) || return nothing, pc
     if is_define_method_call_4arg(stmt)
-        # For define_method(mod, name_or_mt, sigdata, body), args[3] may be a MethodTable
-        arg = stmt.args[3]
-        mt = isa(arg, Core.MethodTable) ? arg : nothing
+        mt = resolve_method_table(interp, frame, stmt.args[3])
     else
         mt = extract_method_table(frame, stmt)
     end
