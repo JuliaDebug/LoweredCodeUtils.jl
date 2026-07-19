@@ -1054,6 +1054,7 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
     while idx < length(stmts)
         stmt = stmts[idx]
         isrequired[idx] || (idx += 1; continue)
+        intypedef = false
         for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
             if idx ∈ typedefr
                 ireq = view(isrequired, typedefr)
@@ -1079,9 +1080,11 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
                     isrequired[ctor] = true
                 end
                 idx = last(typedefr) + 1
-                continue
+                intypedef = true
+                break
             end
         end
+        intypedef && continue
         # Anonymous functions may not yet include the method definition
         if isanonymous_typedef(stmt)
             i = idx + 1

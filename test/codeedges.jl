@@ -302,6 +302,26 @@ module ModSelective end
         @test ret === frame.framedata.ssavalues[frame.pc]
     end
 
+    # Requiring one type definition must not mark an unrelated one that follows it.
+    # (On Julia ≤1.11 the lowered blocks of two consecutive `abstract type`s are
+    # adjacent, and a loop-control bug in `add_typedefs!` marked the second block
+    # in full whenever the first one was required.)
+    let mod = Module(:ModConsecutiveTypedefs)
+        lwr = Meta.lower(mod, quote
+            abstract type AbsA end
+            abstract type AbsB end
+        end)
+        src = lwr.args[1]
+        blocks, names = LoweredCodeUtils.find_typedefs(src)
+        @test names == [:AbsA, :AbsB]
+        edges = CodeEdges(mod, src)
+        isrequired = lines_required(first(blocks[1]) + 1, src, edges)
+        @test !any(isrequired[blocks[2]])
+        selective_eval_fromstart!(Frame(mod, src), isrequired, #=istoplevel=#true)
+        @test @invokelatest(isdefined(mod, :AbsA))
+        @test !@invokelatest(isdefined(mod, :AbsB))
+    end
+
     # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
     frame = Frame(ModSelective, ex)
