@@ -168,8 +168,10 @@ function ismethod_with_name(src, stmt, target::AbstractString; reentrant::Bool=f
             isdone = true
         end
     end
-    # On Julia 1.6 we have to add escaping (CBinding makes function names like "(S)")
-    target = escape_string(target, "()")
+    # Escape all regular-expression metacharacters. Function names can themselves
+    # be operators (for example, `+`) or contain punctuation (for example, CBinding's
+    # names like `(S)`).
+    target = escape_string(target, "\\.^\$|?*+()[]{}")
     return match(Regex("(^|#)$target(\$|#)"), isa(name, GlobalRef) ? string(name.name) : string(name)) !== nothing
 end
 

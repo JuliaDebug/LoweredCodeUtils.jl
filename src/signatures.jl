@@ -690,14 +690,24 @@ methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Boo
 methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddef!(RecursiveInterpreter(), signatures, frame; define)
 
+"""
+    ret = methoddefs!([interp::Interpreter=RecursiveInterpreter()], signatures, frame; define=true)
+
+Process all method definitions at or after `frame.pc`, appending each method-table/signature
+pair to `signatures`. As with [`methoddef!`](@ref), set `define=false` to extract signatures
+without evaluating methods that are already defined. Returns the next program counter, normally
+`nothing` after reaching the end of the frame.
+"""
 function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true)
     ret = methoddef!(interp, signatures, frame, pc; define)
-    pc = ret === nothing ? ret : ret[1]
+    ret === nothing && return nothing
+    pc = ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
 function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true)
     ret = methoddef!(interp, signatures, frame; define)
-    pc = ret === nothing ? ret : ret[1]
+    ret === nothing && return nothing
+    pc = ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
 methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
@@ -705,7 +715,7 @@ methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bo
 methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddefs!(RecursiveInterpreter(), signatures, frame; define)
 
-function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=define)
+function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
