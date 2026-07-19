@@ -255,6 +255,30 @@ module ModSelective end
     @test ModSelective.x == 5
     @test !isdefined(ModSelective, :yy)
 
+    # A controller can be reused for a different slice of the same source.
+    # Its shortcuts and termination points must describe only the latest slice.
+    let mod = Module(:ModReusedController)
+        ex = quote
+            flag = true
+            if flag
+                x = 1
+            else
+                x = 2
+            end
+            y = 3
+        end
+        src = Meta.lower(mod, ex).args[1]
+        edges = CodeEdges(mod, src)
+        controller = SelectiveEvalController()
+        lines_required(GlobalRef(mod, :y), src, edges, controller)
+        isrequired = lines_required(GlobalRef(mod, :x), src, edges, controller)
+        selective_eval_fromstart!(
+            LoweredCodeUtils.RecursiveInterpreter(), Frame(mod, src),
+            isrequired, controller, true)
+        @test @invokelatest(mod.x) == 1
+        @test !@invokelatest(isdefined(mod, :y))
+    end
+
     # Inactive statements at the beginning of a terminal block shouldn't terminate
     # selective evaluation before later required statements in the same block.
     let mod = Module(:ModTerminationPointAfterRequired)
