@@ -190,7 +190,7 @@ end
 """
     controller::SelectiveEvalController
 
-When this object is passed as the `recurse` argument of `selective_eval!`,
+When this object is passed as the `controller` argument of `selective_eval!`,
 the selective execution is adjusted as follows:
 
 - **Termination point**: In Julia's IR representation (`CodeInfo`), a terminal
@@ -731,6 +731,11 @@ end
 function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges,
                          controller::SelectiveEvalController=SelectiveEvalController();
                          norequire = ())
+    # A controller describes one particular slice. Recompute it from scratch so
+    # callers can safely reuse the same object for another slice.
+    empty!(controller.termination_points)
+    empty!(controller.shortcuts)
+
     # Mark any requested objects (their lines of assignment)
     objs = add_requests!(isrequired, objs, edges, norequire)
 
