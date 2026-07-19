@@ -183,6 +183,18 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     ret = methoddef!(empty!(signatures), frame; define=true)
     @test isempty(signatures)
     @test ret === nothing
+
+    # `methoddefs!` must also stop cleanly at a bare forward declaration.
+    frame = Frame(Lowering, :(function another_nomethod end))
+    ret = methoddefs!(empty!(signatures), frame; define=true)
+    @test isempty(signatures)
+    @test ret === nothing
+
+    # Operator names contain regular-expression metacharacters.
+    let mod = Module(:OperatorMethodName)
+        src = Frame(mod, :(+(x, y) = x)).framecode.src
+        @test any(stmt -> LoweredCodeUtils.ismethod_with_name(src, stmt, "+"), src.code)
+    end
     frame = Frame(Lowering, :(function amethod() nothing end))
     ret = methoddef!(empty!(signatures), frame; define=true)
     @test !isempty(signatures)
