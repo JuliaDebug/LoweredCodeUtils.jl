@@ -304,9 +304,8 @@ module ModSelective end
         @test @invokelatest(mod.hits) == [2]
     end
 
-    # `get_return` on a frame that stops at a termination point whose statement was
-    # already executed (e.g. when the frame is reused) must not throw an UndefVarError
-    # (the `isrequired` branch used to reference a stale variable name `pcexec`).
+    # A reused frame may contain an SSA value at an inactive termination point.
+    # Return the value from this selective run, not that stale value.
     let mod = Module(:ModGetReturnAtTerminationPoint)
         ex = quote
             a = 1
@@ -320,10 +319,24 @@ module ModSelective end
         isrequired = lines_required(GlobalRef(mod, :a), src, edges, controller)
         ret = selective_eval_fromstart!(
             LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
-        # execution stopped at a termination point whose ssavalue was stored by the
-        # first run; `get_return` must hand back that stored value
         @test frame.pc ∈ controller.termination_points
-        @test ret === frame.framedata.ssavalues[frame.pc]
+        @test isassigned(frame.framedata.ssavalues, frame.pc)
+        @test ret === nothing
+    end
+
+    # When the final executed statement does store an SSA value, return that value
+    # even if execution subsequently skips to an inactive return statement.
+    let mod = Module(:ModGetLastExecutedValue)
+        src = Meta.lower(mod, quote
+            Base.identity(42)
+            Base.identity(99)
+        end).args[1]
+        isrequired = falses(length(src.code))
+        isrequired[1] = true
+        frame = Frame(mod, src)
+        ret = selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
+        @test isassigned(frame.framedata.ssavalues, 1)
+        @test ret === frame.framedata.ssavalues[1]
     end
 
     # Requiring one type definition must not mark an unrelated one that follows it.
