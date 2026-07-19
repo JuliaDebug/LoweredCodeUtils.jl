@@ -280,6 +280,28 @@ module ModSelective end
         @test @invokelatest(mod.hits) == [2]
     end
 
+    # `get_return` on a frame that stops at a termination point whose statement was
+    # already executed (e.g. when the frame is reused) must not throw an UndefVarError
+    # (the `isrequired` branch used to reference a stale variable name `pcexec`).
+    let mod = Module(:ModGetReturnAtTerminationPoint)
+        ex = quote
+            a = 1
+            sin(0.3)
+        end
+        frame = Frame(mod, ex)
+        JuliaInterpreter.finish!(frame, #=istoplevel=#true)  # first run: all ssavalues get stored
+        src = frame.framecode.src
+        edges = CodeEdges(mod, src)
+        controller = SelectiveEvalController()
+        isrequired = lines_required(GlobalRef(mod, :a), src, edges, controller)
+        ret = selective_eval_fromstart!(
+            LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
+        # execution stopped at a termination point whose ssavalue was stored by the
+        # first run; `get_return` must hand back that stored value
+        @test frame.pc ∈ controller.termination_points
+        @test ret === frame.framedata.ssavalues[frame.pc]
+    end
+
     # Control-flow in an abstract type definition
     ex = :(abstract type StructParent{T, N} <: AbstractArray{T, N} end)
     frame = Frame(ModSelective, ex)
