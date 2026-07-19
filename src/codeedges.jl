@@ -499,7 +499,7 @@ function Base.show(io::IO, edges::CodeEdges)
 end
 
 """
-    edges = CodeEdges(src::CodeInfo)
+    edges = CodeEdges(mod::Module, src::CodeInfo)
 
 Analyze `src` and determine the chain of dependencies.
 
@@ -524,7 +524,7 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     emptylink = Links()
     emptylist = Int[]
     for (i, stmt) in enumerate(src.code)
-        # Identify line predecents for slots and named variables
+        # Identify line predecessors for slots and named variables
         if (lhs_rhs = get_lhs_rhs(stmt); lhs_rhs !== nothing)
             stmt = stmt::Expr
             lhs, _ = lhs_rhs
@@ -1008,7 +1008,7 @@ function record_termination_points!(controller::SelectiveEvalController, isrequi
     nothing
 end
 
-# Do a traveral of "numbered" predecessors and find statement ranges and names of type definitions
+# Do a traversal of "numbered" predecessors and find statement ranges and names of type definitions
 function find_typedefs(src::CodeInfo)
     typedef_blocks, typedef_names = UnitRange{Int}[], Symbol[]
     i = 1

@@ -16,7 +16,7 @@ end
 """
     iscallto(stmt, name, src)
 
-Returns `true` is `stmt` is a call expression to `name`.
+Returns `true` if `stmt` is a call expression to `name`.
 """
 function iscallto(@nospecialize(stmt), mod::Module, name::GlobalRef, src)
     if isa(stmt, Expr)
@@ -348,7 +348,7 @@ end
 
 showempty(list) = isempty(list) ? '∅' : list
 
-# Smooth the transition between CC and Base (not requried for v1.12 and above)
+# Smooth the transition between CC and Base (not required for v1.12 and above)
 rng(bb::BasicBlock) = (r = bb.stmts; return CC.first(r):CC.last(r))
 
 function pushall!(dest, src)

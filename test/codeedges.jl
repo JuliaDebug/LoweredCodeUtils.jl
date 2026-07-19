@@ -67,7 +67,7 @@ module ModSelective end
     # Check that the result of direct evaluation agrees with selective evaluation
     Core.eval(ModEval, ex)
     isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
-    # theere is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
+    # there is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
     selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.x === ModEval.x
     @test allmissing(ModSelective, (:y, :z, :a, :b, :k))

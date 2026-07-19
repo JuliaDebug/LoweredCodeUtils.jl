@@ -344,9 +344,7 @@ Rename the gensymmed methods in `frame` to match those that are currently active
 The issues are described in https://github.com/JuliaLang/julia/issues/30908.
 `frame` will be modified in-place as needed.
 
-Returns a vector of `name=>start:stop` pairs specifying the range of lines in `frame`
-at which method definitions occur. In some cases there may be more than one method with
-the same name in the `start:stop` range.
+Returns a dictionary mapping each method's lowered `GlobalRef` to its [`MethodInfo`](@ref).
 """
 function rename_framemethods! end
 
@@ -389,7 +387,7 @@ rename_framemethods!(frame::Frame) = rename_framemethods!(RecursiveInterpreter()
 
 Scans forward from `pc` in `frame` until a method is found that calls `name`.
 `pctop` points to the beginning of that method's signature.
-`isgen` is true if `name` corresponds to sa GeneratedFunctionStub.
+`isgen` is true if `name` corresponds to a generated-function stub.
 
 Alternatively, this returns `nothing` if `pc` does not appear to point to either
 a keyword or generated method.
