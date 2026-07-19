@@ -222,6 +222,7 @@ SelectiveEvalController() = SelectiveEvalController(BitSet(), CFGShortCut[])
         inner::S
         isrequired::T
         controller::SelectiveEvalController
+        last_executed::Base.RefValue{Int}
     end
 
 An `JuliaInterpreter.Interpreter` that executes only the statements marked `true` in `isrequired`.
@@ -234,7 +235,10 @@ struct SelectiveInterpreter{S<:Interpreter,T<:AbstractVector{Bool}} <: Interpret
     inner::S
     isrequired::T
     controller::SelectiveEvalController
+    last_executed::Base.RefValue{Int}
 end
+SelectiveInterpreter(inner::S, isrequired::T, controller::SelectiveEvalController) where {S<:Interpreter,T<:AbstractVector{Bool}} =
+    SelectiveInterpreter(inner, isrequired, controller, Ref(0))
 
 function namedkeys(cl::CodeLinks)
     ukeys = Set{GlobalRef}()
@@ -1188,6 +1192,7 @@ function JuliaInterpreter.step_expr!(interp::SelectiveInterpreter, frame::Frame,
         end
     end
     if interp.isrequired[pc]
+        interp.last_executed[] = pc
         step_expr!(interp.inner, frame, istoplevel)
     else
         next_or_nothing!(interp, frame)
@@ -1200,10 +1205,10 @@ function JuliaInterpreter.get_return(interp::SelectiveInterpreter, frame::Frame)
         if interp.isrequired[pc]
             return lookup_return(interp.inner, frame, node)
         end
-    else
-        if isassigned(frame.framedata.ssavalues, pc)
-            return frame.framedata.ssavalues[pc]
-        end
+    end
+    pcexec = interp.last_executed[]
+    if pcexec != 0 && isassigned(frame.framedata.ssavalues, pcexec)
+        return frame.framedata.ssavalues[pcexec]
     end
     return nothing
 end
@@ -1235,7 +1240,7 @@ Note that the interpreter does not recurse into callees, so there is currently n
 interprocedural selective evaluation.
 
 This will return either a `BreakpointRef`, the value obtained from the last executed statement
-(if stored to `frame.framedata.ssavlues`), or `nothing`.
+(if stored to `frame.framedata.ssavalues`), or `nothing`.
 Typically, assignment to a variable binding does not result in an ssa store by JuliaInterpreter.
 """
 function selective_eval!(
