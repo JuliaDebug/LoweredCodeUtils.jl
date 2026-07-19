@@ -1174,7 +1174,7 @@ function JuliaInterpreter.get_return(interp::SelectiveInterpreter, frame::Frame)
         end
     else
         if isassigned(frame.framedata.ssavalues, pc)
-            return frame.framedata.ssavalues[pcexec]
+            return frame.framedata.ssavalues[pc]
         end
     end
     return nothing
