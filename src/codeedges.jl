@@ -1061,15 +1061,35 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
                 if !all(ireq)
                     changed = true
                     ireq .= true
-                    # Also mark any by-type constructor(s) associated with this typedef
-                    var = get(edges.byname, typedefn, nothing)
-                    if var !== nothing
-                        for s in var.succs
-                            s ∈ norequire && continue
-                            stmt2 = stmts[s]
-                            if ismethod(stmt2) && (fname = method_name(stmt2::Expr); fname === false || fname === nothing)
-                                isrequired[s] = true
-                            end
+                end
+                # Also mark any by-type constructor(s) associated with this typedef.
+                # Julia 1.12+ emits default constructors as a `_defaultctors` call
+                # that directly consumes the type-body result.
+                for s in edges.succs[last(typedefr)]
+                    s ∈ norequire && continue
+                    if is_defaultctors_call(stmts[s]) && !isrequired[s]
+                        isrequired[s] = true
+                        changed = true
+                    end
+                end
+                # Older lowerings emit anonymous `:method` expressions associated
+                # with the type's global binding.
+                typedefoffset = findfirst(i -> istypedef(getrhs(stmts[i])), typedefr)
+                typedefidx = typedefoffset === nothing ? nothing : first(typedefr) + typedefoffset - 1
+                typedefstmt = typedefidx === nothing ? nothing : getrhs(stmts[typedefidx])
+                typedefmod = isexpr(typedefstmt, :call) && typedefstmt.args[2] isa Module ?
+                    typedefstmt.args[2] : nothing
+                var = typedefmod === nothing ? nothing :
+                    get(edges.byname, GlobalRef(typedefmod, typedefn), nothing)
+                if var !== nothing
+                    for s in var.succs
+                        s ∈ norequire && continue
+                        stmt2 = stmts[s]
+                        if (ismethod(stmt2) &&
+                            (fname = method_name(stmt2::Expr); fname === false || fname === nothing) &&
+                            !isrequired[s])
+                            isrequired[s] = true
+                            changed = true
                         end
                     end
                 end

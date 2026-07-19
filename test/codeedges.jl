@@ -3,7 +3,7 @@ module codeedges
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
 using LoweredCodeUtils: CC
-using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs, is_defaultctors_call
+using LoweredCodeUtils: callee_matches, exclude_named_typedefs, is_defaultctors_call, istypedef
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
@@ -320,6 +320,23 @@ module ModSelective end
         selective_eval_fromstart!(Frame(mod, src), isrequired, #=istoplevel=#true)
         @test @invokelatest(isdefined(mod, :AbsA))
         @test !@invokelatest(isdefined(mod, :AbsB))
+    end
+
+    # Julia 1.12+ lowers default constructors to a single `_defaultctors` call.
+    # Requiring the type definition must require that call too.
+    let mod = Module(:ModRequiredDefaultConstructors)
+        src = Meta.lower(mod, :(struct WithDefaultConstructor; value; end)).args[1]
+        edges = CodeEdges(mod, src)
+        isrequired = lines_required!(istypedef.(src.code), src, edges)
+        ctorpc = findfirst(is_defaultctors_call, src.code)
+        @static if VERSION >= v"1.12-"
+            @test ctorpc !== nothing
+            @test isrequired[ctorpc]
+        end
+        selective_eval_fromstart!(Frame(mod, src), isrequired, #=istoplevel=#true)
+        T = @invokelatest(mod.WithDefaultConstructor)
+        value = Base.invokelatest(T, 7)
+        @test value.value == 7
     end
 
     # Control-flow in an abstract type definition
