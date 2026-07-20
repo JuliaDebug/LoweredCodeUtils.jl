@@ -15,6 +15,7 @@ function hastrackedexpr(@nospecialize(stmt))
             haseval = f === :eval || (callee_matches(f, Base, :getproperty) && is_quotenode(stmt.args[2], :eval))
             callee_matches(f, Core, :_typebody!) && return true, haseval
             callee_matches(f, Core, :_setsuper!) && return true, haseval
+            LoweredCodeUtils.is_define_method_ref(f) && return true, haseval
             f === :include && return true, haseval
         elseif stmt.head === :thunk
             any(s->any(hastrackedexpr(s)), stmt.args[1].code) && return true, haseval
@@ -352,10 +353,10 @@ module ModSelective end
     edges = CodeEdges(ModSelective, src)
     isrequired = fill(false, length(src.code))
     let j = length(src.code) - 1
-        while !Meta.isexpr(src.code[j], :method, 3)
+        while !LoweredCodeUtils.ismethod3(src.code[j])
             j -= 1
         end
-        @assert Meta.isexpr(src.code[j], :method, 3)
+        @assert LoweredCodeUtils.ismethod3(src.code[j])
         isrequired[j] = true
     end
     lines_required!(isrequired, src, edges)
@@ -410,7 +411,7 @@ module ModSelective end
     end)
     src = thk.args[1]
     edges = CodeEdges(Main, src)
-    idx = findfirst(@nospecialize(stmt)->Meta.isexpr(stmt, :method), src.code)
+    idx = findfirst(LoweredCodeUtils.ismethod, src.code)
     lr = lines_required(idx, src, edges; norequire=exclude_named_typedefs(src, edges))
     idx = findfirst(@nospecialize(stmt)->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
     @test lr[idx]
