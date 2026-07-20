@@ -1027,6 +1027,11 @@ end
 function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blocks, typedef_names), norequire)
     changed = false
     stmts = src.code
+    defaultctors = Tuple{Int,BitSet}[]
+    for (i, stmt) in pairs(stmts)
+        is_defaultctors_call(stmt) || continue
+        push!(defaultctors, (i, terminal_preds(i, edges)))
+    end
     idx = 1
     while idx < length(stmts)
         stmt = stmts[idx]
@@ -1048,6 +1053,12 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
                             end
                         end
                     end
+                end
+                for (ctor, preds) in defaultctors
+                    ctor ∈ norequire && continue
+                    any(p -> p ∈ typedefr, preds) || continue
+                    changed |= !isrequired[ctor]
+                    isrequired[ctor] = true
                 end
                 idx = last(typedefr) + 1
                 continue
