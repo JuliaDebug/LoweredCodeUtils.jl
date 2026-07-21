@@ -449,7 +449,7 @@ function replacename!(args::AbstractVector, pr)
             args[i] = QuoteNode(newname.name)
         elseif isa(a, Vector{Any})
             replacename!(a, pr)
-        elseif isa(a, Core.ReturnNode) && isdefined(a, :val) && a.val isa Expr
+        elseif isa(a, ReturnNode) && isdefined(a, :val) && a.val isa Expr
             # there is something like `ReturnNode(Expr(:method, Symbol(...)))`
             replacename!(a.val::Expr, pr)
         elseif a === oldname
