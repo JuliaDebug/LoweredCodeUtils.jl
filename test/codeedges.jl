@@ -584,4 +584,33 @@ end
     end
 end
 
+# Typegroup blocks (Julia versions where `Core.resolve_typegroup` exists).
+# Ordinary structs also lower through the typegroup mechanism on Julia ≥ 1.14
+# and are covered by the cases above; this checks a multi-type group, which has
+# no leading `global` marker and defines several names from one statement range.
+@static if isdefined(Core, :resolve_typegroup)
+    @testset "typegroup blocks" begin
+        m = Module(:TypegroupMock)
+        ex = Expr(:typegroup, Expr(:block,
+            :(struct TGA; b::Union{TGB,Nothing}; end),
+            :(struct TGB; a::TGA; end)))
+        lwr = Meta.lower(m, ex)
+        if lwr isa Expr && lwr.head === :thunk &&
+                any(LoweredCodeUtils.is_resolve_typegroup_call, (first(lwr.args)::Core.CodeInfo).code)
+            src = first(lwr.args)::Core.CodeInfo
+            edges = CodeEdges(m, src)
+            idx = findfirst(LoweredCodeUtils.is_resolve_typegroup_call, src.code)
+            @test istypedef(src.code[idx])
+            blocks, names = LoweredCodeUtils.find_typedefs(src)
+            @test names == [:TGA, :TGB]
+            @test length(blocks) == 2 && blocks[1] == blocks[2]
+            isrq = lines_required!(istypedef.(src.code), src, edges)
+            selective_eval_fromstart!(Frame(m, src), isrq, #=istoplevel=#true)
+            @test @invokelatest(isdefined(m, :TGA))
+            @test @invokelatest(isdefined(m, :TGB))
+            @test @invokelatest(fieldtype(m.TGB, :a)) === @invokelatest(m.TGA)
+        end
+    end
+end
+
 end # module codeedges
