@@ -414,6 +414,8 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
                 add_links!(target, stmt.args[i], cl)
             end
         end
+    elseif (@static @isdefined(EnterNode) ? stmt isa EnterNode : false)
+        isdefined(stmt, :scope) && add_links!(target, stmt.scope, cl)
     elseif stmt isa GotoIfNot
         add_links!(target, stmt.cond, cl)
     elseif stmt isa ReturnNode
