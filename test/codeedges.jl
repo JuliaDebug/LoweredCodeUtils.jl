@@ -88,6 +88,24 @@ module ModSelective end
     selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.k != ModEval.k
 
+    @static if isdefined(Test, Symbol("@with_testset"))
+        let src = Meta.lower(@__MODULE__, :(@testset begin f() = 1 end)).args[1]
+            enteridx = findfirst(src.code) do stmt
+                stmt isa Core.EnterNode && isdefined(stmt, :scope)
+            end
+            @test enteridx !== nothing
+            if enteridx !== nothing
+                scope = (src.code[enteridx]::Core.EnterNode).scope
+                @test scope isa Core.SSAValue
+                if scope isa Core.SSAValue
+                    links = LoweredCodeUtils.CodeLinks(@__MODULE__, src)
+                    @test scope.id in links.ssapreds[enteridx].ssas
+                    @test enteridx in links.ssasuccs[scope.id].ssas
+                end
+            end
+        end
+    end
+
     # Control-flow
     ex = quote
         flag2 = true
