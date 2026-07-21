@@ -199,6 +199,20 @@ function isanonymous_typedef(@nospecialize stmt)
     return false
 end
 
+# Recognize the `Core.resolve_typegroup` call that creates the types of a type
+# group. On Julia versions where `struct` definitions lower through the
+# typegroup mechanism, ordinary structs also produce this form (with a
+# single-element group); `typegroup` blocks produce multi-element groups.
+function is_resolve_typegroup_call(@nospecialize(stmt))
+    isexpr(stmt, :call) || return false
+    f = (stmt::Expr).args[1]
+    is_global_ref(f, Core, :resolve_typegroup) && return true
+    @static if isdefined(Core, :resolve_typegroup)
+        is_quotenode_egal(f, Core.resolve_typegroup) && return true
+    end
+    return false
+end
+
 function istypedef(stmt)
     isa(stmt, Expr) || return false
     stmt = getrhs(stmt)
@@ -215,6 +229,7 @@ function istypedef(stmt)
             end
         end
     end
+    is_resolve_typegroup_call(stmt) && return true
     isanonymous_typedef(stmt) && return true
     return false
 end
@@ -255,6 +270,31 @@ function typedef_range(src::CodeInfo, idx)
         isexpr(s, :global) && break
         is_declare_global(s) && break
         istart -= 1
+    end
+    if is_resolve_typegroup_call(getrhs(stmt))
+        # Typegroup form: `TypeVar` bindings and struct-info svecs, then
+        # `resolve_typegroup(mod, typevars, infos, olds)`, then `getfield`
+        # extractions and one `declare_const` per type, closed by `latestworld`.
+        # Ordinary struct definitions open with a `global` marker; `typegroup`
+        # blocks do not, so if none was found fall back to extending the range
+        # backwards to the previous statement that cannot be part of the group.
+        if istart < 1
+            istart = idx
+            for j = idx-1:-1:1
+                s = src.code[j]
+                (isexpr(s, :latestworld) || isexpr(s, :method) || isexpr(s, :thunk) ||
+                 is_return(s)) && break
+                istart = j
+            end
+        end
+        iend, n = idx, length(src.code)
+        while iend <= n
+            s = src.code[iend]
+            (isexpr(s, :latestworld) || isexpr(s, :global) || is_return(s)) && break
+            iend += 1
+        end
+        iend <= n || error("no final latestworld found for typegroup")
+        return istart:iend-1
     end
     istart >= 1 || error("no initial :global or declare_global found")
     iend, n = idx, length(src.code)

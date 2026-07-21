@@ -1007,13 +1007,29 @@ function find_typedefs(src::CodeInfo)
         if istypedef(stmt) && !isanonymous_typedef(stmt::Expr)
             stmt = stmt::Expr
             r = typedef_range(src, i)
-            push!(typedef_blocks, r)
-            name = stmt.head === :call ? stmt.args[3] : stmt.args[1]
-            if isa(name, QuoteNode)
-                name = name.value
+            if is_resolve_typegroup_call(stmt)
+                # A typegroup defines one type per `declare_const` in the block;
+                # record each name against the same statement range.
+                for j in r
+                    s = src.code[j]
+                    is_declare_const(s) || continue
+                    name = (s::Expr).args[3]
+                    if isa(name, QuoteNode)
+                        name = name.value
+                    end
+                    isa(name, Symbol) || continue
+                    push!(typedef_blocks, r)
+                    push!(typedef_names, name)
+                end
+            else
+                push!(typedef_blocks, r)
+                name = stmt.head === :call ? stmt.args[3] : stmt.args[1]
+                if isa(name, QuoteNode)
+                    name = name.value
+                end
+                isa(name, Symbol) || @show src i r stmt
+                push!(typedef_names, name::Symbol)
             end
-            isa(name, Symbol) || @show src i r stmt
-            push!(typedef_names, name::Symbol)
             i = last(r)+1
         else
             i += 1
