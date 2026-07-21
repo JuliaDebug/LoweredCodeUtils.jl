@@ -414,9 +414,9 @@ function add_links!(target::Pair{Union{SSAValue,SlotNumber,GlobalRef},Links}, @n
                 add_links!(target, stmt.args[i], cl)
             end
         end
-    elseif stmt isa Core.GotoIfNot
+    elseif stmt isa GotoIfNot
         add_links!(target, stmt.cond, cl)
-    elseif stmt isa Core.ReturnNode
+    elseif stmt isa ReturnNode
         add_links!(target, stmt.val, cl)
     end
     return nothing
