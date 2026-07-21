@@ -58,6 +58,21 @@ function callee_matches(f, mod, sym)
     return false
 end
 
+# Recognize the default-constructor call emitted when lowering a struct definition.
+function is_defaultctors_call(@nospecialize(stmt))
+    isexpr(stmt, :call) || return false
+    f = stmt.args[1]
+    is_global_ref(f, Core, :_defaultctors) && return true
+    is_global_ref(f, Base, :_defaultctors) && return true
+    @static if isdefined(Core, :_defaultctors)
+        is_quotenode_egal(f, Core._defaultctors) && return true
+    end
+    @static if isdefined(Base, :_defaultctors)
+        is_quotenode_egal(f, Base._defaultctors) && return true
+    end
+    return false
+end
+
 function getrhs(@nospecialize(stmt))
     lhs_rhs = get_lhs_rhs(stmt)
     return lhs_rhs === nothing ? stmt : lhs_rhs[2]

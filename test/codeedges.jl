@@ -3,7 +3,7 @@ module codeedges
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
 using LoweredCodeUtils: CC
-using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs
+using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs, is_defaultctors_call
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
@@ -40,12 +40,6 @@ function minimal_evaluation(predicate, src::Core.CodeInfo, edges::CodeEdges; kwa
     lines_required!(isrequired, src, edges; kwargs...)
     return isrequired
 end
-
-# Recognize the default-constructor call emitted when lowering a struct definition.
-# `_defaultctors` lived in `Core` through 1.12 but moved to `Base` (JuliaLang/julia, see
-# base/essentials.jl), so accept either home.
-is_defaultctors_call(@nospecialize stmt) = Meta.isexpr(stmt, :call) &&
-    (is_global_ref(stmt.args[1], Base, :_defaultctors) || is_global_ref(stmt.args[1], Core, :_defaultctors))
 
 function allmissing(mod::Module, names)
     for name in names
@@ -303,6 +297,31 @@ module ModSelective end
     selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     let NoParam = @invokelatest ModSelective.NoParam
         @test isa(NoParam(), NoParam)
+    end
+
+    # Requiring a type definition must include its generated default constructors.
+    @static if VERSION ≥ v"1.12-"
+        let mod = Module(:ModRequiredDefaultConstructors)
+            src = Meta.lower(mod, quote
+                struct WithDefaultConstructor
+                    value
+                end
+                struct UnrelatedDefaultConstructor
+                    value
+                end
+            end).args[1]
+            edges = CodeEdges(mod, src)
+            isrequired = lines_required(findfirst(istypedef, src.code), src, edges)
+            ctorpcs = findall(is_defaultctors_call, src.code)
+            @test length(ctorpcs) == 2
+            @test isrequired[first(ctorpcs)]
+            @test !isrequired[last(ctorpcs)]
+            selective_eval_fromstart!(Frame(mod, src), isrequired, true)
+            T = @invokelatest mod.WithDefaultConstructor
+            value = Base.invokelatest(T, 7)
+            @test value.value == 7
+            @test !isdefined(mod, :UnrelatedDefaultConstructor)
+        end
     end
 
     # Parametric
