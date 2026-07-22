@@ -344,9 +344,7 @@ Rename the gensymmed methods in `frame` to match those that are currently active
 The issues are described in https://github.com/JuliaLang/julia/issues/30908.
 `frame` will be modified in-place as needed.
 
-Returns a vector of `name=>start:stop` pairs specifying the range of lines in `frame`
-at which method definitions occur. In some cases there may be more than one method with
-the same name in the `start:stop` range.
+Returns a dictionary mapping each method's lowered `GlobalRef` to its [`MethodInfo`](@ref).
 """
 function rename_framemethods! end
 
@@ -389,7 +387,7 @@ rename_framemethods!(frame::Frame) = rename_framemethods!(RecursiveInterpreter()
 
 Scans forward from `pc` in `frame` until a method is found that calls `name`.
 `pctop` points to the beginning of that method's signature.
-`isgen` is true if `name` corresponds to sa GeneratedFunctionStub.
+`isgen` is true if `name` corresponds to a generated-function stub.
 
 Alternatively, this returns `nothing` if `pc` does not appear to point to either
 a keyword or generated method.
@@ -690,14 +688,24 @@ methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Boo
 methoddef!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddef!(RecursiveInterpreter(), signatures, frame; define)
 
+"""
+    ret = methoddefs!([interp::Interpreter=RecursiveInterpreter()], signatures, frame; define=true)
+
+Process all method definitions at or after `frame.pc`, appending each method-table/signature
+pair to `signatures`. As with [`methoddef!`](@ref), set `define=false` to extract signatures
+without evaluating methods that are already defined. Returns the next program counter, normally
+`nothing` after reaching the end of the frame.
+"""
 function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true)
     ret = methoddef!(interp, signatures, frame, pc; define)
-    pc = ret === nothing ? ret : ret[1]
+    ret === nothing && return nothing
+    pc = ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
 function methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true)
     ret = methoddef!(interp, signatures, frame; define)
-    pc = ret === nothing ? ret : ret[1]
+    ret === nothing && return nothing
+    pc = ret[1]
     return _methoddefs!(interp, signatures, frame, pc; define)
 end
 methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
@@ -705,7 +713,7 @@ methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bo
 methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddefs!(RecursiveInterpreter(), signatures, frame; define)
 
-function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=define)
+function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)

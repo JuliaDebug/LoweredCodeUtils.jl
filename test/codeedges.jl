@@ -3,7 +3,7 @@ module codeedges
 using LoweredCodeUtils
 using LoweredCodeUtils.JuliaInterpreter
 using LoweredCodeUtils: CC
-using LoweredCodeUtils: callee_matches, istypedef, exclude_named_typedefs, is_defaultctors_call
+using LoweredCodeUtils: callee_matches, exclude_named_typedefs, is_defaultctors_call, istypedef
 using JuliaInterpreter: is_global_ref, is_quotenode
 using Test
 
@@ -67,7 +67,7 @@ module ModSelective end
     # Check that the result of direct evaluation agrees with selective evaluation
     Core.eval(ModEval, ex)
     isrequired = lines_required(GlobalRef(ModSelective, :x), src, edges)
-    # theere is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
+    # there is too much diversity in lowering across Julia versions to make it useful to test `sum(isrequired)`
     selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
     @test ModSelective.x === ModEval.x
     @test allmissing(ModSelective, (:y, :z, :a, :b, :k))
@@ -255,6 +255,30 @@ module ModSelective end
     @test ModSelective.x == 5
     @test !isdefined(ModSelective, :yy)
 
+    # A controller can be reused for a different slice of the same source.
+    # Its shortcuts and termination points must describe only the latest slice.
+    let mod = Module(:ModReusedController)
+        ex = quote
+            flag = true
+            if flag
+                x = 1
+            else
+                x = 2
+            end
+            y = 3
+        end
+        src = Meta.lower(mod, ex).args[1]
+        edges = CodeEdges(mod, src)
+        controller = SelectiveEvalController()
+        lines_required(GlobalRef(mod, :y), src, edges, controller)
+        isrequired = lines_required(GlobalRef(mod, :x), src, edges, controller)
+        selective_eval_fromstart!(
+            LoweredCodeUtils.RecursiveInterpreter(), Frame(mod, src),
+            isrequired, controller, true)
+        @test @invokelatest(mod.x) == 1
+        @test !@invokelatest(isdefined(mod, :y))
+    end
+
     # Inactive statements at the beginning of a terminal block shouldn't terminate
     # selective evaluation before later required statements in the same block.
     let mod = Module(:ModTerminationPointAfterRequired)
@@ -278,6 +302,78 @@ module ModSelective end
             LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
         @test @invokelatest(mod.branch_value) == 1
         @test @invokelatest(mod.hits) == [2]
+    end
+
+    # A reused frame may contain an SSA value at an inactive termination point.
+    # Return the value from this selective run, not that stale value.
+    let mod = Module(:ModGetReturnAtTerminationPoint)
+        ex = quote
+            a = 1
+            sin(0.3)
+        end
+        frame = Frame(mod, ex)
+        JuliaInterpreter.finish!(frame, #=istoplevel=#true)  # first run: all ssavalues get stored
+        src = frame.framecode.src
+        edges = CodeEdges(mod, src)
+        controller = SelectiveEvalController()
+        isrequired = lines_required(GlobalRef(mod, :a), src, edges, controller)
+        ret = selective_eval_fromstart!(
+            LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
+        @test frame.pc ∈ controller.termination_points
+        @test isassigned(frame.framedata.ssavalues, frame.pc)
+        @test ret === nothing
+    end
+
+    # When the final executed statement does store an SSA value, return that value
+    # even if execution subsequently skips to an inactive return statement.
+    let mod = Module(:ModGetLastExecutedValue)
+        src = Meta.lower(mod, quote
+            Base.identity(42)
+            Base.identity(99)
+        end).args[1]
+        isrequired = falses(length(src.code))
+        isrequired[1] = true
+        frame = Frame(mod, src)
+        ret = selective_eval_fromstart!(frame, isrequired, #=istoplevel=#true)
+        @test isassigned(frame.framedata.ssavalues, 1)
+        @test ret === frame.framedata.ssavalues[1]
+    end
+
+    # Requiring one type definition must not mark an unrelated one that follows it.
+    # (On Julia ≤1.11 the lowered blocks of two consecutive `abstract type`s are
+    # adjacent, and a loop-control bug in `add_typedefs!` marked the second block
+    # in full whenever the first one was required.)
+    let mod = Module(:ModConsecutiveTypedefs)
+        lwr = Meta.lower(mod, quote
+            abstract type AbsA end
+            abstract type AbsB end
+        end)
+        src = lwr.args[1]
+        blocks, names = LoweredCodeUtils.find_typedefs(src)
+        @test names == [:AbsA, :AbsB]
+        edges = CodeEdges(mod, src)
+        isrequired = lines_required(first(blocks[1]) + 1, src, edges)
+        @test !any(isrequired[blocks[2]])
+        selective_eval_fromstart!(Frame(mod, src), isrequired, #=istoplevel=#true)
+        @test @invokelatest(isdefined(mod, :AbsA))
+        @test !@invokelatest(isdefined(mod, :AbsB))
+    end
+
+    # Julia 1.12+ lowers default constructors to a single `_defaultctors` call.
+    # Requiring the type definition must require that call too.
+    let mod = Module(:ModRequiredDefaultConstructors)
+        src = Meta.lower(mod, :(struct WithDefaultConstructor; value; end)).args[1]
+        edges = CodeEdges(mod, src)
+        isrequired = lines_required!(istypedef.(src.code), src, edges)
+        ctorpc = findfirst(is_defaultctors_call, src.code)
+        @static if VERSION >= v"1.12-"
+            @test ctorpc !== nothing
+            @test isrequired[ctorpc]
+        end
+        selective_eval_fromstart!(Frame(mod, src), isrequired, #=istoplevel=#true)
+        T = @invokelatest(mod.WithDefaultConstructor)
+        value = Base.invokelatest(T, 7)
+        @test value.value == 7
     end
 
     # Control-flow in an abstract type definition

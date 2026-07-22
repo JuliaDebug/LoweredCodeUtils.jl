@@ -16,7 +16,7 @@ end
 """
     iscallto(stmt, name, src)
 
-Returns `true` is `stmt` is a call expression to `name`.
+Returns `true` if `stmt` is a call expression to `name`.
 """
 function iscallto(@nospecialize(stmt), mod::Module, name::GlobalRef, src)
     if isa(stmt, Expr)
@@ -168,8 +168,10 @@ function ismethod_with_name(src, stmt, target::AbstractString; reentrant::Bool=f
             isdone = true
         end
     end
-    # On Julia 1.6 we have to add escaping (CBinding makes function names like "(S)")
-    target = escape_string(target, "()")
+    # Escape all regular-expression metacharacters. Function names can themselves
+    # be operators (for example, `+`) or contain punctuation (for example, CBinding's
+    # names like `(S)`).
+    target = escape_string(target, "\\.^\$|?*+()[]{}")
     return match(Regex("(^|#)$target(\$|#)"), isa(name, GlobalRef) ? string(name.name) : string(name)) !== nothing
 end
 
@@ -346,7 +348,7 @@ end
 
 showempty(list) = isempty(list) ? '∅' : list
 
-# Smooth the transition between CC and Base (not requried for v1.12 and above)
+# Smooth the transition between CC and Base (not required for v1.12 and above)
 rng(bb::BasicBlock) = (r = bb.stmts; return CC.first(r):CC.last(r))
 
 function pushall!(dest, src)

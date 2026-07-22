@@ -190,7 +190,7 @@ end
 """
     controller::SelectiveEvalController
 
-When this object is passed as the `recurse` argument of `selective_eval!`,
+When this object is passed as the `controller` argument of `selective_eval!`,
 the selective execution is adjusted as follows:
 
 - **Termination point**: In Julia's IR representation (`CodeInfo`), a terminal
@@ -222,6 +222,7 @@ SelectiveEvalController() = SelectiveEvalController(BitSet(), CFGShortCut[])
         inner::S
         isrequired::T
         controller::SelectiveEvalController
+        last_executed::Base.RefValue{Int}
     end
 
 An `JuliaInterpreter.Interpreter` that executes only the statements marked `true` in `isrequired`.
@@ -234,7 +235,10 @@ struct SelectiveInterpreter{S<:Interpreter,T<:AbstractVector{Bool}} <: Interpret
     inner::S
     isrequired::T
     controller::SelectiveEvalController
+    last_executed::Base.RefValue{Int}
 end
+SelectiveInterpreter(inner::S, isrequired::T, controller::SelectiveEvalController) where {S<:Interpreter,T<:AbstractVector{Bool}} =
+    SelectiveInterpreter(inner, isrequired, controller, Ref(0))
 
 function namedkeys(cl::CodeLinks)
     ukeys = Set{GlobalRef}()
@@ -495,7 +499,7 @@ function Base.show(io::IO, edges::CodeEdges)
 end
 
 """
-    edges = CodeEdges(src::CodeInfo)
+    edges = CodeEdges(mod::Module, src::CodeInfo)
 
 Analyze `src` and determine the chain of dependencies.
 
@@ -520,7 +524,7 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     emptylink = Links()
     emptylist = Int[]
     for (i, stmt) in enumerate(src.code)
-        # Identify line predecents for slots and named variables
+        # Identify line predecessors for slots and named variables
         if (lhs_rhs = get_lhs_rhs(stmt); lhs_rhs !== nothing)
             stmt = stmt::Expr
             lhs, _ = lhs_rhs
@@ -731,6 +735,11 @@ end
 function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges,
                          controller::SelectiveEvalController=SelectiveEvalController();
                          norequire = ())
+    # A controller describes one particular slice. Recompute it from scratch so
+    # callers can safely reuse the same object for another slice.
+    empty!(controller.termination_points)
+    empty!(controller.shortcuts)
+
     # Mark any requested objects (their lines of assignment)
     objs = add_requests!(isrequired, objs, edges, norequire)
 
@@ -999,7 +1008,7 @@ function record_termination_points!(controller::SelectiveEvalController, isrequi
     nothing
 end
 
-# Do a traveral of "numbered" predecessors and find statement ranges and names of type definitions
+# Do a traversal of "numbered" predecessors and find statement ranges and names of type definitions
 function find_typedefs(src::CodeInfo)
     typedef_blocks, typedef_names = UnitRange{Int}[], Symbol[]
     i = 1
@@ -1054,21 +1063,42 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
     while idx < length(stmts)
         stmt = stmts[idx]
         isrequired[idx] || (idx += 1; continue)
+        intypedef = false
         for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
             if idx ∈ typedefr
                 ireq = view(isrequired, typedefr)
                 if !all(ireq)
                     changed = true
                     ireq .= true
-                    # Also mark any by-type constructor(s) associated with this typedef
-                    var = get(edges.byname, typedefn, nothing)
-                    if var !== nothing
-                        for s in var.succs
-                            s ∈ norequire && continue
-                            stmt2 = stmts[s]
-                            if ismethod(stmt2) && (fname = method_name(stmt2::Expr); fname === false || fname === nothing)
-                                isrequired[s] = true
-                            end
+                end
+                # Also mark any by-type constructor(s) associated with this typedef.
+                # Julia 1.12+ emits default constructors as a `_defaultctors` call
+                # that directly consumes the type-body result.
+                for s in edges.succs[last(typedefr)]
+                    s ∈ norequire && continue
+                    if is_defaultctors_call(stmts[s]) && !isrequired[s]
+                        isrequired[s] = true
+                        changed = true
+                    end
+                end
+                # Older lowerings emit anonymous `:method` expressions associated
+                # with the type's global binding.
+                typedefoffset = findfirst(i -> istypedef(getrhs(stmts[i])), typedefr)
+                typedefidx = typedefoffset === nothing ? nothing : first(typedefr) + typedefoffset - 1
+                typedefstmt = typedefidx === nothing ? nothing : getrhs(stmts[typedefidx])
+                typedefmod = isexpr(typedefstmt, :call) && typedefstmt.args[2] isa Module ?
+                    typedefstmt.args[2] : nothing
+                var = typedefmod === nothing ? nothing :
+                    get(edges.byname, GlobalRef(typedefmod, typedefn), nothing)
+                if var !== nothing
+                    for s in var.succs
+                        s ∈ norequire && continue
+                        stmt2 = stmts[s]
+                        if (ismethod(stmt2) &&
+                            (fname = method_name(stmt2::Expr); fname === false || fname === nothing) &&
+                            !isrequired[s])
+                            isrequired[s] = true
+                            changed = true
                         end
                     end
                 end
@@ -1079,9 +1109,11 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
                     isrequired[ctor] = true
                 end
                 idx = last(typedefr) + 1
-                continue
+                intypedef = true
+                break
             end
         end
+        intypedef && continue
         # Anonymous functions may not yet include the method definition
         if isanonymous_typedef(stmt)
             i = idx + 1
@@ -1160,6 +1192,7 @@ function JuliaInterpreter.step_expr!(interp::SelectiveInterpreter, frame::Frame,
         end
     end
     if interp.isrequired[pc]
+        interp.last_executed[] = pc
         step_expr!(interp.inner, frame, istoplevel)
     else
         next_or_nothing!(interp, frame)
@@ -1172,10 +1205,10 @@ function JuliaInterpreter.get_return(interp::SelectiveInterpreter, frame::Frame)
         if interp.isrequired[pc]
             return lookup_return(interp.inner, frame, node)
         end
-    else
-        if isassigned(frame.framedata.ssavalues, pc)
-            return frame.framedata.ssavalues[pcexec]
-        end
+    end
+    pcexec = interp.last_executed[]
+    if pcexec != 0 && isassigned(frame.framedata.ssavalues, pcexec)
+        return frame.framedata.ssavalues[pcexec]
     end
     return nothing
 end
@@ -1207,7 +1240,7 @@ Note that the interpreter does not recurse into callees, so there is currently n
 interprocedural selective evaluation.
 
 This will return either a `BreakpointRef`, the value obtained from the last executed statement
-(if stored to `frame.framedata.ssavlues`), or `nothing`.
+(if stored to `frame.framedata.ssavalues`), or `nothing`.
 Typically, assignment to a variable binding does not result in an ssa store by JuliaInterpreter.
 """
 function selective_eval!(
