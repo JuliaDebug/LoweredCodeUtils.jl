@@ -730,9 +730,11 @@ function exclude_named_typedefs(src::CodeInfo)
     return norequire
 end
 
-function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, edges::CodeEdges,
-                         controller::SelectiveEvalController=SelectiveEvalController();
-                         norequire = ())
+function lines_required!(
+        isrequired::AbstractVector{Bool}, objs::Set{GlobalRef}, src::CodeInfo, edges::CodeEdges,
+        controller::SelectiveEvalController=SelectiveEvalController();
+        norequire = ()
+    )
     # A controller describes one particular slice. Recompute it from scratch so
     # callers can safely reuse the same object for another slice.
     empty!(controller.termination_points)
@@ -780,7 +782,10 @@ function lines_required!(isrequired::AbstractVector{Bool}, objs, src::CodeInfo, 
     return isrequired
 end
 
-function add_requests!(isrequired, objs, edges::CodeEdges, norequire)
+function add_requests!(
+        isrequired::AbstractVector{Bool}, objs::Set{GlobalRef}, edges::CodeEdges,
+        norequire
+    )
     objsnew = Set{GlobalRef}()
     for obj in objs
         add_obj!(isrequired, objsnew, obj, edges, norequire)
@@ -788,7 +793,9 @@ function add_requests!(isrequired, objs, edges::CodeEdges, norequire)
     return objsnew
 end
 
-function add_ssa_preds!(isrequired, src::CodeInfo, edges::CodeEdges, norequire)
+function add_ssa_preds!(
+        isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges, norequire
+    )
     changed = false
     for idx = 1:length(src.code)
         if isrequired[idx]
@@ -798,18 +805,22 @@ function add_ssa_preds!(isrequired, src::CodeInfo, edges::CodeEdges, norequire)
     return changed
 end
 
-function add_named_dependencies!(isrequired, edges::CodeEdges, objs, norequire)
+function add_named_dependencies!(
+        isrequired::AbstractVector{Bool}, edges::CodeEdges, objs::Set{GlobalRef}, norequire
+    )
     changed = false
     for (obj, uses) in edges.byname
         obj ∈ objs && continue
-        if any(view(isrequired, uses.succs))
+        if any(view(isrequired, uses.succs))::Bool
             changed |= add_obj!(isrequired, objs, obj, edges, norequire)
         end
     end
     return changed
 end
 
-function add_preds!(isrequired, idx, edges::CodeEdges, norequire)
+function add_preds!(
+        isrequired::AbstractVector{Bool}, idx::Int, edges::CodeEdges, norequire
+    )
     chngd = false
     preds = edges.preds[idx]
     for p in preds
@@ -821,18 +832,10 @@ function add_preds!(isrequired, idx, edges::CodeEdges, norequire)
     end
     return chngd
 end
-function add_succs!(isrequired, idx, edges::CodeEdges, succs, norequire)
-    chngd = false
-    for p in succs
-        isrequired[p] && continue
-        p ∈ norequire && continue
-        isrequired[p] = true
-        chngd = true
-        add_succs!(isrequired, p, edges, edges.succs[p], norequire)
-    end
-    return chngd
-end
-function add_obj!(isrequired, objs, obj::GlobalRef, edges::CodeEdges, norequire)
+function add_obj!(
+        isrequired::AbstractVector{Bool}, objs::Set{GlobalRef}, obj::GlobalRef,
+        edges::CodeEdges, norequire
+    )
     chngd = false
     for p in edges.byname[obj].preds
         p ∈ norequire && continue
@@ -1049,7 +1052,11 @@ end
 
 # New struct definitions, including their constructors, get spread out over many
 # statements. If we're evaluating any of them, it's important to evaluate *all* of them.
-function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blocks, typedef_names), norequire)
+function add_typedefs!(
+        isrequired, src::CodeInfo, edges::CodeEdges,
+        typedefs::Tuple{Vector{UnitRange{Int}},Vector{Symbol}},
+        norequire
+    )
     changed = false
     stmts = src.code
     defaultctors = Tuple{Int,BitSet}[]
@@ -1062,7 +1069,7 @@ function add_typedefs!(isrequired, src::CodeInfo, edges::CodeEdges, (typedef_blo
         stmt = stmts[idx]
         isrequired[idx] || (idx += 1; continue)
         intypedef = false
-        for (typedefr, typedefn) in zip(typedef_blocks, typedef_names)
+        for (typedefr, typedefn) in zip(typedefs...)
             if idx ∈ typedefr
                 ireq = view(isrequired, typedefr)
                 if !all(ireq)
