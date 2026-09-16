@@ -395,7 +395,6 @@ a keyword or generated method.
 function find_name_caller_sig(interp::Interpreter, frame::Frame, pc::Int, name::GlobalRef)
     stmt = pc_expr(frame, pc)
     while true
-        pc0 = pc
         while !ismethod3(stmt)
             pc = next_or_nothing(interp, frame, pc)
             pc === nothing && return nothing
@@ -660,7 +659,7 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
         stmt = stmt::Expr
         mmod3 = method_module(stmt)
         name3 = normalize_defsig(method_name(stmt), mmod3 !== nothing ? mmod3 : moduleof(frame))
-        methinfo === nothing && (error("expected a signature"); return next_or_nothing(interp, frame, pc)), pc3
+        methinfo === nothing && error("expected a signature")
         mt, sigt = methinfo
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
