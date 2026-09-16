@@ -452,7 +452,7 @@ function replacename!(args::AbstractVector, pr)
             replacename!(a.val::Expr, pr)
         elseif a === oldname
             args[i] = newname
-        elseif a == oldname.name
+        elseif a === oldname.name
             args[i] = newname.name
         end
     end
@@ -728,11 +728,11 @@ end
 
 function is_self_call(@nospecialize(stmt), slotnames, argno::Integer=1)
     if isa(stmt, Expr)
-        if stmt.head == :call
+        if stmt.head === :call
             a = stmt.args[argno]
             if isa(a, SlotNumber) || isa(a, Core.SlotNumber)
                 sn = slotnames[a.id]
-                if sn == Symbol("#self#") || sn == Symbol("") # allow empty to fix https://github.com/timholy/CodeTracking.jl/pull/48
+                if sn === Symbol("#self#") || sn === Symbol("") # allow empty to fix https://github.com/timholy/CodeTracking.jl/pull/48
                     return true
                 end
             end
