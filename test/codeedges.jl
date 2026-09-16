@@ -297,9 +297,8 @@ module ModSelective end
         isrequired = fill(false, length(src.code))
         targetidx = findlast(stmt -> Meta.isexpr(stmt, :call), src.code) # the second push!
         isrequired[targetidx] = true
-        lines_required!(isrequired, (GlobalRef(mod, :branch_value),), src, edges, controller)
-        selective_eval_fromstart!(
-            LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
+        lines_required!(isrequired, Set((GlobalRef(mod, :branch_value),)), src, edges, controller)
+        selective_eval_fromstart!(LoweredCodeUtils.RecursiveInterpreter(), frame, isrequired, controller, true)
         @test @invokelatest(mod.branch_value) == 1
         @test @invokelatest(mod.hits) == [2]
     end
