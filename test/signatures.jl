@@ -502,7 +502,7 @@ end
 # https://github.com/timholy/Revise.jl/issues/643
 module Revise643
 
-using LoweredCodeUtils, JuliaInterpreter, Test
+using JuliaInterpreter, LoweredCodeUtils, Test
 
 # make sure to not define `foogr` before macro expansion,
 # otherwise it will be resolved as `QuoteNode`

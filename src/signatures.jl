@@ -601,7 +601,7 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
                 codeloc = codelocation(code, pc)
                 loc = linetable(code, codeloc)
                 ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
-                if !startswith(String((ft.name::Core.TypeName).name), "##")
+                if !startswith(String((ft.name::Core.TypeName).name), "##") && loc !== nothing
                     @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
                 end
                 if pc == pc3
