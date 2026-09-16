@@ -678,7 +678,7 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
     pc = frame.pc
     stmt = pc_expr(frame, pc)
     if !ismethod(stmt)
-        pc = next_until!(ismethod, interp, frame, true)
+        pc = next_until!(is_frame_at_method, interp, frame, true)
     end
     pc === nothing && error("pc at end of frame without finding a method")
     methoddef!(interp, signatures, frame, pc; define)
@@ -717,7 +717,7 @@ function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fr
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
-            pc = next_until!(ismethod, interp, frame, true)
+            pc = next_until!(is_frame_at_method, interp, frame, true)
         end
         pc === nothing && break
         ret = methoddef!(interp, signatures, frame, pc; define)
