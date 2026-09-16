@@ -50,10 +50,10 @@ if ccall(:jl_generating_output, Cint, ()) == 1
     edges = CodeEdges(@__MODULE__, src)
     isrequired = lines_required(GlobalRef(@__MODULE__, :s), src, edges)
     lines_required(GlobalRef(@__MODULE__, :s), src, edges; norequire=())
-    lines_required(GlobalRef(@__MODULE__, :s), src, edges; norequire=exclude_named_typedefs(src, edges))
+    lines_required(GlobalRef(@__MODULE__, :s), src, edges; norequire=exclude_named_typedefs(src))
     for isreq in (isrequired, convert(Vector{Bool}, isrequired))
         lines_required!(isreq, src, edges; norequire=())
-        lines_required!(isreq, src, edges; norequire=exclude_named_typedefs(src, edges))
+        lines_required!(isreq, src, edges; norequire=exclude_named_typedefs(src))
     end
     frame = Frame(@__MODULE__, src)
     # selective_eval_fromstart!(frame, isrequired, true)

@@ -326,7 +326,6 @@ function direct_links!(cl::CodeLinks, src::CodeInfo)
             target = P(SSAValue(i), cl.ssapreds[i])
         elseif (lhs_rhs = get_lhs_rhs(stmt); lhs_rhs !== nothing)
             # An assignment
-            stmt = stmt::Expr
             lhs, rhs = lhs_rhs
             if @issslotnum(lhs)
                 lhs = lhs::AnySlotNumber
@@ -481,7 +480,7 @@ struct CodeEdges
     succs::Vector{Vector{Int}}
     byname::Dict{GlobalRef,Variable}
 end
-CodeEdges(n::Integer) = CodeEdges([Int[] for i = 1:n], [Int[] for i = 1:n], Dict{GlobalRef,Variable}())
+CodeEdges(n::Integer) = CodeEdges([Int[] for _ = 1:n], [Int[] for _ = 1:n], Dict{GlobalRef,Variable}())
 
 function Base.show(io::IO, edges::CodeEdges)
     println(io, "CodeEdges:")
@@ -526,7 +525,6 @@ function CodeEdges(src::CodeInfo, cl::CodeLinks)
     for (i, stmt) in enumerate(src.code)
         # Identify line predecessors for slots and named variables
         if (lhs_rhs = get_lhs_rhs(stmt); lhs_rhs !== nothing)
-            stmt = stmt::Expr
             lhs, _ = lhs_rhs
             # Mark predecessors and successors of this line by following ssas & named assignments
             if @issslotnum(lhs)
@@ -705,7 +703,7 @@ On return, the complete set of required statements will be marked `true`.
 
 `norequire` keyword argument specifies statements (represented as iterator of `Int`s) that
 should _not_ be marked as a requirement.
-For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src, edges)` if you're
+For example, use `norequire = LoweredCodeUtils.exclude_named_typedefs(src)` if you're
 extracting method signatures and not evaluating new definitions.
 """
 function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges::CodeEdges,
@@ -715,7 +713,7 @@ function lines_required!(isrequired::AbstractVector{Bool}, src::CodeInfo, edges:
     return lines_required!(isrequired, objs, src, edges, controller; kwargs...)
 end
 
-function exclude_named_typedefs(src::CodeInfo, edges::CodeEdges)
+function exclude_named_typedefs(src::CodeInfo)
     norequire = BitSet()
     i = 1
     nstmts = length(src.code)
@@ -1296,7 +1294,7 @@ function print_with_code(io::IO, src::CodeInfo, isrequired::AbstractVector{Bool}
     preprint(::IO) = nothing
     preprint(io::IO, idx::Int) = (c = isrequired[idx]; printstyled(io, lpad(idx, nd), ' ', c ? "t " : "f "; color = c ? :cyan : :plain))
     postprint(::IO) = nothing
-    postprint(::IO, idx::Int, bbchanged::Bool) = nothing
+    postprint(::IO, _idx::Int, _bbchanged::Bool) = nothing
 
     print_with_code(preprint, postprint, io, src)
 end
