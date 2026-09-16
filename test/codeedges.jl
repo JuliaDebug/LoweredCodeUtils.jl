@@ -507,7 +507,7 @@ module ModSelective end
     frame = Frame(ModEval, ex)
     src = frame.framecode.src
     edges = CodeEdges(ModEval, src)
-    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src, edges))  # initially mark only the constructor
+    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src))  # initially mark only the constructor
     bbs = CC.compute_basic_blocks(src.code)
     for (iblock, block) in enumerate(bbs.blocks)
         r = LoweredCodeUtils.rng(block)
@@ -545,7 +545,7 @@ module ModSelective end
     src = thk.args[1]
     edges = CodeEdges(Main, src)
     idx = findfirst(LoweredCodeUtils.ismethod, src.code)
-    lr = lines_required(idx, src, edges; norequire=exclude_named_typedefs(src, edges))
+    lr = lines_required(idx, src, edges; norequire=exclude_named_typedefs(src))
     idx = findfirst(@nospecialize(stmt)->Meta.isexpr(stmt, :(=)) && Meta.isexpr(stmt.args[2], :call) && is_global_ref(stmt.args[2].args[1], Core, :Box), src.code)
     @test lr[idx]
     # but make sure we don't break primitivetype & abstracttype (https://github.com/timholy/Revise.jl/pull/611)
@@ -553,7 +553,6 @@ module ModSelective end
         primitive type WindowsRawSocket sizeof(Ptr) * 8 end
     end)
     src = thk.args[1]
-    edges = CodeEdges(Main, src)
     idx = findfirst(istypedef, src.code)
     r = LoweredCodeUtils.typedef_range(src, idx)
     # 1 before :latestworld, 2 after
@@ -592,14 +591,12 @@ module ModSelective end
         # CodeEdges
         edges = CodeEdges(Main, src)
         show(io, edges)
-        str = String(take!(io))
         LoweredCodeUtils.print_with_code(io, src, edges)
-        str = String(take!(io))
         # Works with Frames too
         frame = Frame(ModSelective, ex)
         edges = CodeEdges(ModSelective, frame.framecode.src)
         LoweredCodeUtils.print_with_code(io, frame, edges)
-        str = String(take!(io))
+        _ = String(take!(io))
 
         # display slot names
         ex = :(let

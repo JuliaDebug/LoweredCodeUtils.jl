@@ -5,7 +5,6 @@ using InteractiveUtils
 using CodeTracking: MethodInfoKey
 using JuliaInterpreter
 using Core: CodeInfo
-using Base.Meta: isexpr
 using Test
 
 module Lowering
@@ -115,7 +114,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         Core.eval(Lowering, ex)
         frame = Frame(Lowering, ex)
         rename_framemethods!(frame)
-        pc = methoddefs!(signatures, frame; define=false)
+        methoddefs!(signatures, frame; define=false)
         push!(newcode, frame.framecode.src)
     end
 
@@ -234,7 +233,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     signatures = MethodInfoKey[]
     methoddef!(signatures, frame; define=false)
     @test length(signatures) == 1
-    mt, sig = first(signatures)
+    _mt, sig = first(signatures)
     @test sig == which(Base.max_values, Tuple{Type{Int16}}).sig
 
     # define
@@ -301,10 +300,10 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     empty!(signatures)
     stmt = JuliaInterpreter.pc_expr(frame)
     if !LoweredCodeUtils.ismethod(stmt)
-        pc = JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod, frame, true)
+        JuliaInterpreter.next_until!(LoweredCodeUtils.is_frame_at_method, frame, true)
     end
-    pc, _ = methoddef!(signatures, frame; define=false)  # this tests that the return isn't `nothing`
-    pc, _ = methoddef!(signatures, frame; define=false)
+    methoddef!(signatures, frame; define=false)  # this tests that the return isn't `nothing`
+    methoddef!(signatures, frame; define=false)
     @test length(signatures) == 2  # both the GeneratedFunctionStub and the main method
 
     # With anonymous functions in signatures
@@ -353,10 +352,10 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     methoddefs!(signatures, frame; define=true)
     ex = :(typedsig(x::Int) = 2)
     frame = Frame(Lowering, ex)
-    JuliaInterpreter.next_until!(LoweredCodeUtils.ismethod3, frame, true)
+    JuliaInterpreter.next_until!(LoweredCodeUtils.is_frame_at_method3, frame, true)
     empty!(signatures)
     methoddefs!(signatures, frame; define=true)
-    mt, sig = first(signatures)
+    _mt, sig = first(signatures)
     @test sig.parameters[end] == Int
 
     # Multiple keyword arg methods per frame
@@ -435,7 +434,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     Core.eval(Lowering422, ex)
     frame = Frame(Lowering422, ex)
     rename_framemethods!(frame)
-    pc = methoddefs!(signatures, frame; define=false)
+    methoddefs!(signatures, frame; define=false)
     @test typeof(Lowering422.fneg) ∈ Set(Base.unwrap_unionall(sig).parameters[1] for (_, sig) in signatures)
 
     # Scoped names (https://github.com/timholy/Revise.jl/issues/568)
@@ -450,7 +449,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
     while pc < pcstop
         pc = JuliaInterpreter.step_expr!(frame, true)
     end
-    pc = methoddef!(signatures, frame, pc; define=true)
+    methoddef!(signatures, frame, pc; define=true)
     @test MethodInfoKey(nothing, Tuple{typeof(Lowering.f568)}) ∈ signatures
     @test Lowering.f568() == -2
 
@@ -493,7 +492,7 @@ bodymethtest5(x, y=Dict(1=>2)) = 5
         Core.eval(m, ex)
         frame = Frame(m, ex)
         rename_framemethods!(frame)
-        pc = methoddefs!(signatures, frame; define=false)
+        methoddefs!(signatures, frame; define=false)
         @test !isempty(signatures)   # really we just need to know that `methoddefs!` completed without getting stuck
     finally
         Pkg.activate(oldenv; io=devnull) # back to the original environment

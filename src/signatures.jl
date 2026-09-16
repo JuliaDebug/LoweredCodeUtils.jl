@@ -331,7 +331,7 @@ function set_to_running_name!(interp::Interpreter, replacements::Dict{GlobalRef,
         throw(err)
     end
     replacements[callee] = cname
-    mi = methodinfos[cname] = methodinfos[callee]
+    methodinfos[cname] = methodinfos[callee]
     src = frame.framecode.src
     replacename!(src, callee=>cname) # the method itself
     return replacements
@@ -363,7 +363,7 @@ function _rename_framemethods!(interp::Interpreter, frame::Frame,
         end
     end
     for sc in selfcalls
-        linetop, linebody, callee, caller = sc.linetop, sc.linebody, sc.callee, sc.caller
+        linetop, callee = sc.linetop, sc.callee
         cname = get(replacements, callee, nothing)
         if cname !== nothing && cname !== callee
             replacename!(method_body(src.code[linetop])::CodeInfo, callee=>cname)
@@ -570,7 +570,7 @@ By default the method will be defined (evaluated). You can prevent this by setti
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
 """
 function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
-    framecode, pcin = frame.framecode, pc
+    framecode = frame.framecode
     if ismethod3(stmt)
         pc3 = pc
         arg1 = method_name(stmt)
