@@ -60,7 +60,7 @@ function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::I
             return nothing, pc
         else
             lastpc = pc
-            pc = step_expr!(interp, frame, stmt, true)
+            pc = throw_if_breakpoint(step_expr!(interp, frame, stmt, true))
             pc === nothing && return nothing, lastpc
         end
         stmt = pc_expr(frame, pc)
@@ -119,11 +119,12 @@ function signature_top(frame, stmt::Expr, pc)
 end
 
 function step_through_methoddef(interp::Interpreter, frame::Frame, @nospecialize(stmt))
-    while !ismethod(stmt)
-        pc = step_expr!(interp, frame, stmt, true)
+    while true
+        pc = throw_if_breakpoint(step_expr!(interp, frame, stmt, true))
+        pc === nothing && error("frame terminated before reaching a `:method` expression")
+        ismethod(stmt) && return pc  # `stmt` was the `:method` expression, so the method is now defined
         stmt = pc_expr(frame, pc)
     end
-    return step_expr!(interp, frame, stmt, true)  # also define the method
 end
 
 """
@@ -462,6 +463,7 @@ function get_running_name(interp::Interpreter, frame::Frame, pc::Int, name::Glob
     nameinfo = find_name_caller_sig(interp, frame, pc, name)
     if nameinfo === nothing
         pc = skip_until(@nospecialize(stmt)->ismethod3(stmt), frame, pc)
+        pc === nothing && return name, nothing, nothing  # no `:method` remains in `frame`
         pc = next_or_nothing(interp, frame, pc)
         return name, pc, nothing
     end
@@ -517,6 +519,21 @@ function next_or_nothing!(::Interpreter, frame::Frame)
     return nothing
 end
 
+# `step_expr!` and `next_until!` return a `BreakpointRef` when execution hits a breakpoint, or when
+# `JuliaInterpreter.break_on(:error)`/`break_on(:throw)` is active and a statement throws.
+# The method-definition walkers in this file are not debugger commands and cannot pause, so a
+# `BreakpointRef` is never a valid program counter here: if it carries the error that triggered it,
+# that error is rethrown (i.e., what would have propagated had `break_on` been inactive); otherwise
+# an error is raised. Either way `pc` is narrowed to `Union{Int,Nothing}` for the callers.
+function throw_if_breakpoint(pc)
+    if pc isa BreakpointRef
+        err = pc.err
+        err === nothing && error("unexpected breakpoint while processing method definitions: ", pc)
+        throw(err)
+    end
+    return pc
+end
+
 """
     nextpc = skip_until(predicate, [interp::Interpreter=RecursiveInterpreter()], frame, pc)
     nextpc = skip_until!(predicate, [interp::Interpreter=RecursiveInterpreter()], frame)
@@ -567,22 +584,26 @@ occurs for "empty method" expressions, e.g., `:(function foo end)`. `pc` will be
 
 By default the method will be defined (evaluated). You can prevent this by setting `define=false`.
 This is recommended if you are simply extracting signatures from code that has already been evaluated.
+
+`pc` is never a `BreakpointRef`: hitting a breakpoint while stepping (or a statement throwing while
+`JuliaInterpreter.break_on(:error)` is active) raises an error instead.
 """
 function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, @nospecialize(stmt), pc::Int; define::Bool=true)
     framecode = frame.framecode
     if ismethod3(stmt)
         pc3 = pc
         arg1 = method_name(stmt)
-        (mt, sigt), pc = signature(interp, frame, stmt, pc)
+        methinfo, pc = signature(interp, frame, stmt, pc)
+        mt, sigt = methinfo::MethodInfoKey  # `stmt` is already the 3-arg `:method`, so a signature is always found
         # Resolve the signature against the live method tables at the latest committed world.
         # `whichtt`'s default world is the caller's task world, which is too old here: the method
         # may have just been defined by `step_expr!` (advancing the world past `frame.world`), and
         # a caller may be driving this in a task pinned to an older world (e.g. Revise revising).
         meth = whichtt(sigt, mt; world=Base.get_world_counter())
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
-            pc = define ? step_expr!(interp, frame, stmt, true) : next_or_nothing!(interp, frame)
+            pc = define ? throw_if_breakpoint(step_expr!(interp, frame, stmt, true)) : next_or_nothing!(interp, frame)
         elseif define
-            pc = step_expr!(interp, frame, stmt, true)
+            pc = throw_if_breakpoint(step_expr!(interp, frame, stmt, true))
             meth = whichtt(sigt, mt; world=Base.get_world_counter())
         end
         if isa(meth, Method) && (meth.sig <: sigt && sigt <: meth.sig)
@@ -590,14 +611,14 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
         else
             if arg1 === false || arg1 === nothing || isa(mt, MethodTable)
                 # If it's anonymous and not defined, define it
-                pc = step_expr!(interp, frame, stmt, true)
+                pc = throw_if_breakpoint(step_expr!(interp, frame, stmt, true))
                 meth = whichtt(sigt, mt; world=Base.get_world_counter())
                 isa(meth, Method) && push!(signatures, MethodInfoKey(mt, meth.sig))
                 return pc, pc3
             else
                 # guard against busted lookup, e.g., https://github.com/JuliaLang/julia/issues/31112
                 code = framecode.src
-                codeloc = codelocation(code, pc)
+                codeloc = codelocation(code, pc3)
                 loc = linetable(code, codeloc)
                 ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
                 if !startswith(String((ft.name::Core.TypeName).name), "##") && loc !== nothing
@@ -608,7 +629,7 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
                 end
             end
         end
-        frame.pc = pc
+        # `frame.pc` is already up to date: `step_expr!` and `next_or_nothing!` both advance it
         return pc, pc3
     end
     ismethod1(stmt) || Base.invokelatest(error, "expected method opening, got ", stmt)
@@ -664,11 +685,13 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
         # Methods like f(x::Ref{<:Real}) that use gensymmed typevars will not have the *exact*
         # signature of the active method. So let's get the active signature.
         frame.pc = pc
-        pc = define ? step_expr!(interp, frame, stmt, true) : next_or_nothing!(interp, frame)
+        pc = define ? throw_if_breakpoint(step_expr!(interp, frame, stmt, true)) : next_or_nothing!(interp, frame)
         meth = whichtt(sigt, mt; world=Base.get_world_counter())
         isa(meth, Method) && push!(signatures, MethodInfoKey(mt, meth.sig)) # inner methods are not visible
         name === name3 && return pc, pc3     # if this was an inner method we should keep going
-        stmt = pc_expr(frame, pc)  # there *should* be more statements in this frame
+        # this was an inner method, so the frame must still contain the outer method
+        pc === nothing && error("frame terminated after inner method ", name3, " without defining ", name)
+        stmt = pc_expr(frame, pc)
     end
 end
 methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true) =
@@ -677,7 +700,7 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
     pc = frame.pc
     stmt = pc_expr(frame, pc)
     if !ismethod(stmt)
-        pc = next_until!(is_frame_at_method, interp, frame, true)
+        pc = throw_if_breakpoint(next_until!(is_frame_at_method, interp, frame, true))
     end
     pc === nothing && error("pc at end of frame without finding a method")
     methoddef!(interp, signatures, frame, pc; define)
@@ -712,11 +735,11 @@ methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bo
 methoddefs!(signatures::Vector{MethodInfoKey}, frame::Frame; define::Bool=true) =
     methoddefs!(RecursiveInterpreter(), signatures, frame; define)
 
-function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Int; define::Bool=true)
+function _methoddefs!(interp::Interpreter, signatures::Vector{MethodInfoKey}, frame::Frame, pc::Union{Int,Nothing}; define::Bool=true)
     while pc !== nothing
         stmt = pc_expr(frame, pc)
         if !ismethod(stmt)
-            pc = next_until!(is_frame_at_method, interp, frame, true)
+            pc = throw_if_breakpoint(next_until!(is_frame_at_method, interp, frame, true))
         end
         pc === nothing && break
         ret = methoddef!(interp, signatures, frame, pc; define)
