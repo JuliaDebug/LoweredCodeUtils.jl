@@ -496,24 +496,26 @@ module ModSelective end
     @test ModSelective.max_values(Int16) === 65536
 
     # Avoid redefining types
-    ex = quote
-        struct MyNewType
-            x::Int
-            MyNewType(y::Int) = new(y)
+    let isrequired
+        ex = quote
+            struct MyNewType
+                x::Int
+                MyNewType(y::Int) = new(y)
+            end
         end
-    end
-    Core.eval(ModEval, ex)
-    frame = Frame(ModEval, ex)
-    src = frame.framecode.src
-    edges = CodeEdges(ModEval, src)
-    isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src))  # initially mark only the constructor
-    bbs = CC.compute_basic_blocks(src.code)
-    for (iblock, block) in enumerate(bbs.blocks)
-        r = LoweredCodeUtils.rng(block)
-        if iblock == length(bbs.blocks)
-            @test any(idx->isrequired[idx], r)
-        else
-            @test !any(idx->isrequired[idx], r)
+        Core.eval(ModEval, ex)
+        frame = Frame(ModEval, ex)
+        src = frame.framecode.src
+        edges = CodeEdges(ModEval, src)
+        isrequired = minimal_evaluation(@nospecialize(stmt)->(LoweredCodeUtils.ismethod3(stmt),false), src, edges; norequire=exclude_named_typedefs(src))  # initially mark only the constructor
+        bbs = CC.compute_basic_blocks(src.code)
+        for (iblock, block) in enumerate(bbs.blocks)
+            r = LoweredCodeUtils.rng(block)
+            if iblock == length(bbs.blocks)
+                @test any(idx->isrequired[idx], r)
+            else
+                @test !any(idx->isrequired[idx], r)
+            end
         end
     end
 

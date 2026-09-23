@@ -633,28 +633,30 @@ module BreakpointRefTest end
     # With `break_on(:error)` active, `step_expr!` returns a `BreakpointRef` carrying the error
     # instead of throwing. The method walkers cannot pause, so that error must surface unchanged
     # rather than failing later on the `BreakpointRef` being used as a program counter.
-    ex = :(f_bp(x::UndefinedType_bp) = 1)
-    JuliaInterpreter.break_on(:error)
-    try
-        frame = Frame(BreakpointRefTest, ex)
-        @test_throws UndefVarError methoddefs!(MethodInfoKey[], frame)
-    finally
-        JuliaInterpreter.break_off(:error)
+    let ex = :(f_bp(x::UndefinedType_bp) = 1)
+        JuliaInterpreter.break_on(:error)
+        try
+            frame = Frame(BreakpointRefTest, ex)
+            @test_throws UndefVarError methoddefs!(MethodInfoKey[], frame)
+        finally
+            JuliaInterpreter.break_off(:error)
+        end
     end
 
     # An (error-free) breakpoint on a statement of the frame is reported as an error.
-    ex = quote
-        g_bp(x) = 1
-        h_bp(x) = 2
+    let ex = quote
+            g_bp(x) = 1
+            h_bp(x) = 2
+        end
+        frame = Frame(BreakpointRefTest, ex)
+        idx = findfirst(frame.framecode.src.code) do stmt
+            LoweredCodeUtils.ismethod1(stmt) || return false
+            name = LoweredCodeUtils.normalize_defsig(LoweredCodeUtils.method_name(stmt), frame)
+            return name isa GlobalRef && name.name === :h_bp
+        end
+        frame.framecode.breakpoints[idx] = JuliaInterpreter.BreakpointState(true, JuliaInterpreter.truecondition)
+        @test_throws ErrorException methoddefs!(MethodInfoKey[], frame)
     end
-    frame = Frame(BreakpointRefTest, ex)
-    idx = findfirst(frame.framecode.src.code) do stmt
-        LoweredCodeUtils.ismethod1(stmt) || return false
-        name = LoweredCodeUtils.normalize_defsig(LoweredCodeUtils.method_name(stmt), frame)
-        return name isa GlobalRef && name.name === :h_bp
-    end
-    frame.framecode.breakpoints[idx] = JuliaInterpreter.BreakpointState(true, JuliaInterpreter.truecondition)
-    @test_throws ErrorException methoddefs!(MethodInfoKey[], frame)
 end
 
 end # module signatures
