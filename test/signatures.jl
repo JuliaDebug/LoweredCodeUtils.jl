@@ -627,6 +627,24 @@ end
     @test LoweredCodeUtils.identify_framemethod_calls(frame) isa Any  # must not throw
 end
 
+module FoldedCallees
+struct Callable end
+end
+
+@testset "Callees with and without JuliaInterpreter's const folding" begin
+    # JuliaInterpreter folds `const` callees such as `Core.svec` into `QuoteNode`s only when
+    # it optimizes the frame, and not in top-level code on Julia 1.12+; otherwise they remain
+    # `GlobalRef`s. Both forms must be recognized.
+    lwr = Meta.lower(FoldedCallees, :((::Callable)(x) = x))
+    for optimize in (true, false)
+        src = Frame(FoldedCallees, lwr.args[1]::CodeInfo; optimize).framecode.src
+        # the method has no name, so its signature is walked to find `Callable`
+        @test any(src.code) do stmt
+            LoweredCodeUtils.ismethod3(stmt) && LoweredCodeUtils.ismethod_with_name(src, stmt, "Callable")
+        end
+    end
+end
+
 module BreakpointRefTest end
 
 @testset "BreakpointRef from JuliaInterpreter is an error, not a pc" begin
