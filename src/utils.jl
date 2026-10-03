@@ -150,16 +150,16 @@ function ismethod_with_name(src::CodeInfo, @nospecialize(stmt), target::Abstract
     while !isdone
         if name isa AnySSAValue || name isa AnySlotNumber
             name = src.code[name.id]
-        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.svec)
+        elseif isexpr(name, :call) && callee_matches(name.args[1], Core, :svec)
             name = name.args[2]
-        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.Typeof)
+        elseif isexpr(name, :call) && callee_matches(name.args[1], Core, :Typeof)
             name = name.args[2]
-        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], Core.apply_type)
+        elseif isexpr(name, :call) && callee_matches(name.args[1], Core, :apply_type)
             for arg in name.args[2:end]
                 ismethod_with_name(src, arg, target; reentrant=true) && return true
             end
             isdone = true
-        elseif isexpr(name, :call) && is_quotenode_egal(name.args[1], UnionAll)
+        elseif isexpr(name, :call) && callee_matches(name.args[1], Core, :UnionAll)
             for arg in name.args[2:end]
                 ismethod_with_name(src, arg, target; reentrant=true) && return true
             end

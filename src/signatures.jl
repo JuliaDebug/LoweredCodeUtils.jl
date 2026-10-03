@@ -51,13 +51,10 @@ In this case, `lastpc == pc`.
 If no 3-argument `:method` expression is found, `nothing` will be returned in place of `(mt, sigt)`.
 """
 function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::Int)
-    mod = moduleof(frame)
     lastpc = frame.pc = pc
     while !ismethod3(stmt)  # wait for the 3-arg :method or 4-arg define_method
         if isanonymous_typedef(stmt)
             lastpc = pc = step_through_methoddef(interp, frame, stmt)   # define an anonymous function
-        elseif is_Typeof_for_anonymous_methoddef(stmt, frame.framecode.src.code, mod)
-            return nothing, pc
         else
             lastpc = pc
             pc = throw_if_breakpoint(step_expr!(interp, frame, stmt, true))
@@ -83,19 +80,6 @@ function signature(interp::Interpreter, frame::Frame, @nospecialize(stmt), pc::I
 end
 signature(interp::Interpreter, frame::Frame, pc::Int) = signature(interp, frame, pc_expr(frame, pc), pc)
 signature(frame::Frame, pc::Int) = signature(RecursiveInterpreter(), frame, pc)
-
-function is_Typeof_for_anonymous_methoddef(@nospecialize(stmt), code::Vector{Any}, mod::Module)
-    isexpr(stmt, :call) || return false
-    f = stmt.args[1]
-    isa(f, QuoteNode) || return false
-    f.value === Core.Typeof || return false
-    arg1 = stmt.args[2]
-    if isa(arg1, SSAValue)
-        arg1 = code[arg1.id]
-    end
-    arg1 isa Symbol || return false
-    return !isdefined(mod, arg1)
-end
 
 function minid(@nospecialize(node), stmts, id)
     if isa(node, SSAValue)
