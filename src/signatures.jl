@@ -488,12 +488,22 @@ end
 
 Advance the program counter without executing the corresponding line.
 If `frame` is finished, `nextpc` will be `nothing`.
+
+`next_or_nothing!` still advances the world of `frame` for a `:latestworld` statement, so
+that the statements that follow see the definitions made before it.
 """
 next_or_nothing(frame::Frame, pc::Int) = next_or_nothing(RecursiveInterpreter(), frame, pc)
 next_or_nothing(::Interpreter, frame::Frame, pc::Int) = pc < nstatements(frame.framecode) ? pc+1 : nothing
 next_or_nothing!(frame::Frame) = next_or_nothing!(RecursiveInterpreter(), frame)
 function next_or_nothing!(::Interpreter, frame::Frame)
     pc = frame.pc
+    # Since Julia 1.12, top-level code advances its world only at `:latestworld`, which
+    # JuliaInterpreter follows, so skipping one would leave later statements reading
+    # bindings in a world prior to their definition. This is done here rather than by
+    # selecting `:latestworld` in `lines_required!`, since a selected statement pulls in its
+    # control flow and type definition, which would grow the slice by branch conditions,
+    # loops, and types it does not need.
+    isexpr(pc_expr(frame, pc), :latestworld) && (frame.world = Base.get_world_counter())
     if pc < nstatements(frame.framecode)
         return frame.pc = pc + 1
     end

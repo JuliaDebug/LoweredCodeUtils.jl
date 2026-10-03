@@ -725,4 +725,23 @@ end
     end
 end
 
+@testset "skipped :latestworld still advances the world" begin
+    # Selective evaluation skips the `:latestworld` statements it does not select, e.g.
+    # the one after the anonymous function of `max_values` in the "CodeEdges" tests above,
+    # which then fail on JuliaInterpreter versions that advance the world of top-level code
+    # only at `:latestworld`.
+    m = Module(:SkippedLatestworld)
+    world = Base.get_world_counter()
+    Core.eval(m, :(defined_after = 1))
+    lwsrc = (Meta.lower(m, :(global gl = 1; gl))::Expr).args[1]::Core.CodeInfo
+    lwidx = findfirst(stmt -> Meta.isexpr(stmt, :latestworld), lwsrc.code)
+    if lwidx !== nothing
+        frame = Frame(m, lwsrc; world)
+        frame.pc = lwidx
+        LoweredCodeUtils.next_or_nothing!(frame)
+        @test frame.pc == lwidx + 1
+        @test frame.world > world
+    end
+end
+
 end # module codeedges
