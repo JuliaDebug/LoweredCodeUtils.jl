@@ -45,7 +45,6 @@ end
 extract_signatures_in_world(mod::Module, ex::Expr, w::UInt) =
     Base.invoke_in_world(w, collect_signatures, mod, ex)
 
-bodymethtest0(x) = 0
 function bodymethtest0(x)
     y = 2x
     y + x
