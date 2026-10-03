@@ -126,6 +126,16 @@ function method_module(@nospecialize(stmt))
     return nothing
 end
 
+# Extract the signature data from a method3 statement.
+# For Expr(:method, name, sig, body) it's args[2]; for define_method(mod, name, sigdata, body) it's args[4].
+function method_sig(@nospecialize(stmt))
+    if is_define_method_call_4arg(stmt)
+        return stmt.args[4]
+    else
+        return stmt.args[2]
+    end
+end
+
 # Extract the CodeInfo body from a method3 statement.
 # For Expr(:method, name, sig, body) it's args[3]; for define_method(mod, name, sigdata, body) it's args[5].
 function method_body(@nospecialize(stmt))
@@ -142,8 +152,8 @@ function ismethod_with_name(src::CodeInfo, @nospecialize(stmt), target::Abstract
     else
         ismethod3(stmt) || return false
         name = method_name(stmt)
-        if name === nothing && isexpr(stmt, :method)
-            name = stmt.args[2]
+        if name === nothing
+            name = method_sig(stmt)
         end
     end
     isdone = false
