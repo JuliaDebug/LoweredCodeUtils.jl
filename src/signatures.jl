@@ -96,10 +96,7 @@ end
 
 function signature_top(frame, stmt::Expr, pc)
     @assert ismethod3(stmt)
-    if is_define_method_call_4arg(stmt)
-        return minid(stmt.args[4], frame.framecode.src.code, pc)
-    end
-    return minid(stmt.args[2], frame.framecode.src.code, pc)
+    return minid(method_sig(stmt), frame.framecode.src.code, pc)
 end
 
 function step_through_methoddef(interp::Interpreter, frame::Frame, @nospecialize(stmt))
