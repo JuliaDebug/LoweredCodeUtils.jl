@@ -612,7 +612,8 @@ function methoddef!(interp::Interpreter, signatures::Vector{MethodInfoKey}, fram
                 codeloc = codelocation(code, pc3)
                 loc = linetable(code, codeloc)
                 ft = Base.unwrap_unionall((Base.unwrap_unionall(sigt)::DataType).parameters[1])
-                if !startswith(String((ft.name::Core.TypeName).name), "##") && loc !== nothing
+                # `ft` may not be a `DataType`, e.g. `Type{T}` on Julia 1.14+ or a callable `Union`
+                if !(ft isa DataType && startswith(String(ft.name.name), "##")) && loc !== nothing
                     @warn "file $(loc.file), line $(loc.line): no method found for $sigt"
                 end
                 if pc == pc3
