@@ -253,9 +253,19 @@ end
 # try to normalize `def` to `GlobalRef` representation
 function normalize_defsig(@nospecialize(def), mod::Module)
     if def isa QuoteNode
-        # A quoted Symbol (e.g. the callee of `:foo(x)`) is already a name; only
-        # other wrapped values (functions, types, modules) need `nameof`.
-        def = def.value isa Symbol ? def.value : nameof(def.value)
+        val = def.value
+        if val isa Symbol
+            # A quoted Symbol (e.g. the callee of `:foo(x)`) is already a name.
+            def = val
+        elseif val isa Union{Function, DataType, UnionAll, Module}
+            # The quoted values that have a name (e.g. a `const` callee that
+            # JuliaInterpreter folded into a `QuoteNode`).
+            def = nameof(val)
+        else
+            # Any other quoted value, e.g. an instance of a callable struct that a macro
+            # interpolated as the callee of a call, is not a name: leave it as it is.
+            return def
+        end
     end
     if def isa Symbol
         def = GlobalRef(mod, def)
