@@ -5,7 +5,9 @@ module LoweredCodeUtils
 # a Julia base or stdlib package are located in this file here.
 # Nothing else should appear in this file here, apart from
 # the `include("packagedef.jl")` statement, which loads what
-# we would normally consider the bulk of the package code.
+# we would normally consider the bulk of the package code,
+# and the precompile workload in precompile.jl, which uses
+# PrecompileTools.
 # This somewhat unusual structure is in place to support
 # the VS Code extension integration.
 
@@ -19,7 +21,9 @@ using JuliaInterpreter:
     is_quotenode_egal, is_return, linetable, lookup, lookup_return, moduleof, next_until!,
     nstatements, pc_expr, step_expr!, whichtt
 using Compiler: Compiler as CC
+using PrecompileTools: PrecompileTools
 
 include("packagedef.jl")
+include("precompile.jl")
 
 end # module
