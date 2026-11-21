@@ -626,6 +626,37 @@ end
     @test LoweredCodeUtils.identify_framemethod_calls(frame) isa Any  # must not throw
 end
 
+# A callable value that is neither a function, a type nor a module: it has no `nameof`.
+module QuotedCallee
+struct Offset
+    value::Float64
+end
+(offset::Offset)(x) = x + offset.value
+end
+
+@testset "normalize_defsig with a quoted callable value as callee" begin
+    # A macro may interpolate an arbitrary value as the callee of a call,
+    # `$(QuoteNode(Offset(2.0)))(x)`, which lowers to a `:call` whose callee is that
+    # `QuoteNode`. Only functions, types and modules have a `nameof`; any other quoted
+    # value is not a name and must be left as it is instead of throwing.
+    for val in (QuotedCallee.Offset(2.0), 1, "s", Union{Int,String})
+        qn = QuoteNode(val)
+        @test LoweredCodeUtils.normalize_defsig(qn, QuotedCallee) === qn
+    end
+    for (val, name) in ((sum, :sum), (Int, :Int64), (Base, :Base))
+        @test LoweredCodeUtils.normalize_defsig(QuoteNode(val), QuotedCallee) === GlobalRef(QuotedCallee, name)
+    end
+
+    ex = :(apply_offset(x) = $(QuoteNode(QuotedCallee.Offset(2.0)))(x))
+    methodinfos, selfcalls = LoweredCodeUtils.identify_framemethod_calls(Frame(QuotedCallee, ex))
+    @test haskey(methodinfos, GlobalRef(QuotedCallee, :apply_offset))
+    @test isempty(selfcalls)
+    signatures = MethodInfoKey[]
+    methoddefs!(signatures, Frame(QuotedCallee, ex))
+    @test length(signatures) == 1
+    @test Base.invokelatest(QuotedCallee.apply_offset, 3.0) == 5.0
+end
+
 module FoldedCallees
 struct Callable end
 end
